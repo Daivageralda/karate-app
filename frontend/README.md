@@ -1,60 +1,110 @@
-# EO Karate Frontend Starter
+# EO Karate Frontend
 
-Starter frontend berbasis Next.js (JavaScript) + Tailwind CSS dengan struktur feature-based yang ringan untuk solo development.
+Frontend untuk operasional event karate, dibangun dengan Next.js App Router dan arsitektur feature-based.
 
-## Persiapan
+## Ringkasan
 
-1. Copy environment file:
+- Framework: Next.js
+- UI: React + CSS global
+- Bahasa: JavaScript (tanpa TypeScript)
+- Fokus: admin panel users, dojos, events, dan dashboard dojo
 
-	cp .env.example .env.local
+## Menjalankan Lokal
 
-2. Pastikan backend berjalan di base URL yang sama dengan nilai NEXT_PUBLIC_API_BASE_URL.
+### Prasyarat
 
-## Menjalankan Project
+- Node.js LTS
+- Backend eo-karate berjalan di lokal
 
-1. Install dependency:
+### Setup
 
-	npm install
+1. Install dependencies:
 
-2. Jalankan mode development:
+```bash
+npm install
+```
 
-	npm run dev
+2. (Opsional) Buat `.env.local` jika ingin override API base URL:
 
-3. Buka http://localhost:3000.
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
+```
 
-## Struktur Arsitektur
+3. Jalankan development server:
 
-- app: route page Next.js yang tipis
-- features: folder per fitur seperti home, users, events, health
-- shared/components: komponen reusable lintas fitur
-- shared/config: env, endpoint, konten UI, route, dan theme
-- shared/services: API client reusable
-- shared/utils: formatter dan helper pagination/resource page
+```bash
+npm run dev
+```
 
-## Alur Data
+4. Buka `http://localhost:3000`.
 
-1. Route page di folder app menerima request.
-2. Route memanggil page-data builder di folder feature.
-3. Feature page-data memakai service fitur yang sesuai.
-4. Service fitur mengambil data melalui shared API client.
-5. Components merender hasil page data.
+## Environment Variables
 
-## Endpoint yang Sudah Dipetakan
+| Variable | Wajib | Default | Keterangan |
+|---|---|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Tidak | `http://localhost:8080` | Base URL backend API |
 
-- GET /api/v1/health
-- GET /api/v1/users
-- POST /api/v1/users
-- GET /api/v1/users/:id
-- GET /api/v1/events
-- POST /api/v1/events
-- GET /api/v1/events/:id
+Catatan: fallback URL dikonfigurasi di `shared/config/env.js`.
 
-## Prinsip Implementasi
+## Scripts
 
-- JavaScript only (tanpa TypeScript)
-- React files memakai JSX
-- Struktur utama: app -> features -> shared
-- Data fetching dikelompokkan per fitur
-- Value warna dipusatkan pada theme variables
-- Copy teks UI dipusatkan di konfigurasi
-- JSX tetap menghindari hardcode value yang berulang
+| Command | Fungsi |
+|---|---|
+| `npm run dev` | Menjalankan server development |
+| `npm run build` | Build production |
+| `npm run start` | Menjalankan hasil build production |
+| `npm run lint` | Menjalankan ESLint |
+
+## Struktur Folder
+
+```text
+frontend/
+├── app/                  # Route pages dan API route Next.js
+├── features/             # Modul per fitur (users, events, dojos, dashboard)
+├── shared/
+│   ├── components/       # Reusable components lintas fitur
+│   ├── config/           # Env, routes, app config, theme
+│   ├── services/         # API client umum
+│   └── utils/            # Formatter dan utilitas umum
+└── public/               # Static assets
+```
+
+## Pola Arsitektur
+
+Alur utama data pada halaman:
+
+1. Route di `app/` menjadi entry point halaman.
+2. Halaman memanggil page-data/service di `features/<nama-fitur>/`.
+3. Service fitur menggunakan API client dari `shared/services/`.
+4. Data dipresentasikan oleh komponen fitur atau komponen reusable.
+
+Pola ini menjaga route tetap tipis dan logic domain tetap terisolasi per fitur.
+
+## Integrasi API yang Dipakai
+
+Contoh endpoint backend yang sudah terpakai:
+
+- `GET /api/v1/health`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/register`
+- `GET /api/v1/users`
+- `POST /api/v1/users`
+- `GET /api/v1/users/:id`
+- `GET /api/v1/dojos`
+- `POST /api/v1/dojos`
+- `GET /api/v1/events`
+- `POST /api/v1/events`
+- `GET /api/v1/events/:id`
+
+## Prinsip Pengembangan
+
+- Utamakan pemisahan concern: route -> feature -> shared.
+- Simpan logic API di service, bukan di komponen presentasi.
+- Gunakan konfigurasi terpusat untuk env, route, dan konten statis.
+- Hindari hardcoded string berulang di banyak file.
+
+## Troubleshooting Cepat
+
+- Data halaman kosong: cek backend aktif dan nilai `NEXT_PUBLIC_API_BASE_URL`.
+- Error CORS/API: pastikan base URL backend sesuai port yang berjalan.
+- Route API frontend gagal: validasi path di `app/api/.../route.js`.
