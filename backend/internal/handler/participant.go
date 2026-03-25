@@ -20,6 +20,10 @@ type ParticipantHandler struct {
 	participantService *service.ParticipantService
 }
 
+type updateParticipantStatusRequest struct {
+	Status string `json:"status"`
+}
+
 // NewParticipantHandler creates a new ParticipantHandler instance
 func NewParticipantHandler(participantService *service.ParticipantService) *ParticipantHandler {
 	return &ParticipantHandler{participantService: participantService}
@@ -148,6 +152,29 @@ func (h *ParticipantHandler) GetParticipants(c *gin.Context) {
 			"count": len(participants),
 		},
 		"data": participants,
+	})
+}
+
+// ListEventRegistrationDojos handles GET /api/v1/events/:id/registrations/dojos
+// Returns dojo-level registration summaries for an event.
+func (h *ParticipantHandler) ListEventRegistrationDojos(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	items, err := h.participantService.ListEventRegistrationDojos(c.Request.Context(), eventID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch dojo registrations")
+		return
+	}
+
+	response.Success(c, http.StatusOK, "dojo registrations retrieved", gin.H{
+		"items": items,
+		"meta": gin.H{
+			"count": len(items),
+		},
 	})
 }
 
@@ -344,6 +371,93 @@ func (h *ParticipantHandler) DeleteParticipant(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, "participant deleted", gin.H{})
+}
+
+// UpdateParticipantStatus handles PUT /api/v1/events/:id/dojos/:dojoId/participants/:participantId/status
+// Updates one participant approval status.
+func (h *ParticipantHandler) UpdateParticipantStatus(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid participant id")
+		return
+	}
+
+	var req updateParticipantStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	participant, err := h.participantService.UpdateParticipantStatusByDojo(
+		c.Request.Context(),
+		eventID,
+		dojoID,
+		participantID,
+		req.Status,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			response.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
+
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, "participant status updated", participant)
+}
+
+// UpdateRecommendationLetterStatus handles PUT /api/v1/events/:id/dojos/:dojoId/recommendation-letter/status
+// Updates the approval status of a recommendation letter.
+func (h *ParticipantHandler) UpdateRecommendationLetterStatus(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	var req updateParticipantStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	letter, err := h.participantService.UpdateRecommendationLetterStatus(
+		c.Request.Context(),
+		eventID,
+		dojoID,
+		req.Status,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			response.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
+
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, "recommendation letter status updated", letter)
 }
 
 // DeleteDojoRegistration handles DELETE /api/v1/events/:id/dojos/:dojoId/registration

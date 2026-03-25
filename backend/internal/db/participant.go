@@ -359,6 +359,71 @@ func (p *ParticipantDB) GetStatusSummary(
 	return summary, nil
 }
 
+// ListEventRegistrationDojos returns dojo-level registration summaries for an event.
+func (p *ParticipantDB) ListEventRegistrationDojos(
+	ctx context.Context,
+	eventID uuid.UUID,
+) ([]models.EventRegistrationDojo, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT
+			d.id,
+			d.name,
+			d.logo_url,
+			COUNT(DISTINCT p.id) AS total_athletes,
+			COUNT(DISTINCT CASE WHEN pd.document_type = $2 THEN pd.participant_id END) AS surat_kesehatan_uploaded,
+			COUNT(DISTINCT CASE WHEN pd.document_type = $3 THEN pd.participant_id END) AS akta_kelahiran_uploaded,
+			COALESCE(drl.status, $4) AS recommendation_letter_status,
+			MIN(p.created_at) AS registered_at,
+			GREATEST(MAX(p.updated_at), COALESCE(MAX(drl.uploaded_at), MAX(p.updated_at))) AS updated_at
+		FROM participants p
+		JOIN dojos d ON d.id = p.dojo_id
+		LEFT JOIN participant_documents pd ON pd.participant_id = p.id
+		LEFT JOIN dojo_recommendation_letters drl ON drl.event_id = p.event_id AND drl.dojo_id = p.dojo_id
+		WHERE p.event_id = $1
+		GROUP BY d.id, d.name, d.logo_url, drl.status
+		ORDER BY updated_at DESC, d.name ASC
+	`
+
+	rows, err := p.db.Query(
+		queryCtx,
+		query,
+		eventID,
+		models.DocumentTypeSuratKesehatan,
+		models.DocumentTypeAktaKelahiran,
+		models.DocumentStatusNotUploaded,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list event registration dojos: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]models.EventRegistrationDojo, 0)
+	for rows.Next() {
+		var item models.EventRegistrationDojo
+		err := rows.Scan(
+			&item.DojoID,
+			&item.DojoName,
+			&item.DojoLogoURL,
+			&item.TotalAthletes,
+			&item.SuratKesehatanUploaded,
+			&item.AktaKelahiranUploaded,
+			&item.RecommendationLetterStatus,
+			&item.RegisteredAt,
+			&item.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan event registration dojo: %w", err)
+		}
+
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
 // DeleteDojoRegistration deletes participant registration data for a dojo in an event.
 // It is blocked when recommendation letter status is approved (overall dojo registration approved).
 func (p *ParticipantDB) DeleteDojoRegistration(
@@ -485,4 +550,69 @@ func (p *ParticipantDB) DeleteParticipantByDojo(
 	}
 
 	return nil
+}
+
+// UpdateRecommendationLetterStatus updates the status of a recommendation letter for a dojo in an event.
+func (p *ParticipantDB) UpdateRecommendationLetterStatus(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+	status string,
+) (*models.DojoRecommendationLetter, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	query := `
+		UPDATE dojo_recommendation_letters
+		SET status = $3
+		WHERE event_id = $1 AND dojo_id = $2
+		RETURNING id, dojo_id, event_id, file_path, uploaded_at, status
+	`
+
+	var letter models.DojoRecommendationLetter
+	err := p.db.QueryRow(queryCtx, query, eventID, dojoID, status).Scan(
+		&letter.ID, &letter.DojoID, &letter.EventID, &letter.FilePath, &letter.UploadedAt, &letter.Status,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("update recommendation letter status: %w", err)
+	}
+
+	return &letter, nil
+}
+
+// UpdateParticipantStatusByDojo updates one participant status within an event+dojo scope.
+func (p *ParticipantDB) UpdateParticipantStatusByDojo(
+	ctx context.Context,
+	eventID, dojoID, participantID uuid.UUID,
+	status string,
+) (*models.Participant, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	query := `
+		UPDATE participants
+		SET status = $4, updated_at = NOW()
+		WHERE id = $1 AND event_id = $2 AND dojo_id = $3
+		RETURNING id, event_id, dojo_id, nama_lengkap, tempat_lahir, tanggal_lahir::text,
+			jenis_kelamin, berat_badan, kategori_tanding, kelas_tanding, status, created_at, updated_at
+	`
+
+	var participant models.Participant
+	err := p.db.QueryRow(queryCtx, query, participantID, eventID, dojoID, status).Scan(
+		&participant.ID, &participant.EventID, &participant.DojoID,
+		&participant.NamaLengkap, &participant.TempatLahir, &participant.TanggalLahir,
+		&participant.JenisKelamin, &participant.BeratBadan,
+		&participant.KategoriTanding, &participant.KelasTanding,
+		&participant.Status, &participant.CreatedAt, &participant.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("update participant status: %w", err)
+	}
+
+	return &participant, nil
 }

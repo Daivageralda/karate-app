@@ -135,6 +135,19 @@ type ParticipantStatusSummary struct {
 	RecommendationLetterStatus string `json:"recommendation_letter_status"` // pending, approved
 }
 
+// EventRegistrationDojo represents dojo-level registration summary within an event.
+type EventRegistrationDojo struct {
+	DojoID                     uuid.UUID `json:"dojo_id"`
+	DojoName                   string    `json:"dojo_name"`
+	DojoLogoURL                string    `json:"dojo_logo_url"`
+	TotalAthletes              int       `json:"total_athletes"`
+	SuratKesehatanUploaded     int       `json:"surat_kesehatan_uploaded"`
+	AktaKelahiranUploaded      int       `json:"akta_kelahiran_uploaded"`
+	RecommendationLetterStatus string    `json:"recommendation_letter_status"`
+	RegisteredAt               time.Time `json:"registered_at"`
+	UpdatedAt                  time.Time `json:"updated_at"`
+}
+
 // UploadedParticipantsExcelPreview represents persisted preview data for the latest uploaded participant Excel file.
 type UploadedParticipantsExcelPreview struct {
 	FileName   string     `json:"file_name"`

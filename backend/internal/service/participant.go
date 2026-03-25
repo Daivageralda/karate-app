@@ -234,6 +234,27 @@ func (s *ParticipantService) GetParticipants(
 	return participants, nil
 }
 
+// ListEventRegistrationDojos returns dojo-level registration summaries for an event.
+func (s *ParticipantService) ListEventRegistrationDojos(
+	ctx context.Context,
+	eventID uuid.UUID,
+) ([]models.EventRegistrationDojo, error) {
+	if eventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	items, err := s.participantDB.ListEventRegistrationDojos(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+
+	if items == nil {
+		items = []models.EventRegistrationDojo{}
+	}
+
+	return items, nil
+}
+
 // DeleteDojoRegistration deletes dojo registration data for an event if not approved yet.
 func (s *ParticipantService) DeleteDojoRegistration(
 	ctx context.Context,
@@ -277,6 +298,72 @@ func (s *ParticipantService) DeleteParticipantFromDojoRegistration(
 	}
 
 	return nil
+}
+
+// UpdateRecommendationLetterStatus updates the status of a recommendation letter.
+func (s *ParticipantService) UpdateRecommendationLetterStatus(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+	status string,
+) (*models.DojoRecommendationLetter, error) {
+	if eventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	if dojoID == uuid.Nil {
+		return nil, fmt.Errorf("dojo_id is required")
+	}
+
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != models.DocumentStatusPending && status != models.DocumentStatusApproved {
+		return nil, fmt.Errorf("status must be pending or approved")
+	}
+
+	letter, err := s.participantDB.UpdateRecommendationLetterStatus(ctx, eventID, dojoID, status)
+	if err != nil {
+		return nil, err
+	}
+
+	if letter == nil {
+		return nil, fmt.Errorf("recommendation letter not found")
+	}
+
+	return letter, nil
+}
+
+// UpdateParticipantStatusByDojo updates one participant status in a dojo registration.
+func (s *ParticipantService) UpdateParticipantStatusByDojo(
+	ctx context.Context,
+	eventID, dojoID, participantID uuid.UUID,
+	status string,
+) (*models.Participant, error) {
+	if eventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	if dojoID == uuid.Nil {
+		return nil, fmt.Errorf("dojo_id is required")
+	}
+
+	if participantID == uuid.Nil {
+		return nil, fmt.Errorf("participant_id is required")
+	}
+
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != models.ParticipantStatusPending && status != models.ParticipantStatusApproved {
+		return nil, fmt.Errorf("status must be pending or approved")
+	}
+
+	participant, err := s.participantDB.UpdateParticipantStatusByDojo(ctx, eventID, dojoID, participantID, status)
+	if err != nil {
+		return nil, err
+	}
+
+	if participant == nil {
+		return nil, fmt.Errorf("participant not found")
+	}
+
+	return participant, nil
 }
 
 // GenerateExcelTemplate generates a template Excel file for participants
