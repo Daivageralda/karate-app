@@ -46,7 +46,7 @@ const formatGender = (value) => {
   return formatText(value) || "-";
 };
 
-const getStatusMeta = (status) => {
+const getRecommendationStatusMeta = (status) => {
   if (status === "approved") {
     return { label: "Disetujui", className: "bg-green-100 text-green-700" };
   }
@@ -55,7 +55,32 @@ const getStatusMeta = (status) => {
     return { label: "Menunggu Persetujuan", className: "bg-amber-100 text-amber-700" };
   }
 
-  return { label: "Belum Lengkap", className: "bg-app-surface-muted text-app-text-secondary" };
+  return { label: "Belum Diupload", className: "bg-app-surface-muted text-app-text-secondary" };
+};
+
+const getRegistrationStatusMeta = (summary) => {
+  const totalParticipants = Number(summary?.totalParticipants || 0);
+  const approvedParticipants = Number(summary?.approvedParticipants || 0);
+  const suratKesehatanUploaded = Number(summary?.suratKesehatanUploaded || 0);
+  const aktaKelahiranUploaded = Number(summary?.aktaKelahiranUploaded || 0);
+  const recommendationLetterStatus = summary?.recommendationLetterStatus || "not_uploaded";
+
+  const isCompleted =
+    totalParticipants > 0 &&
+    approvedParticipants >= totalParticipants &&
+    suratKesehatanUploaded >= totalParticipants &&
+    aktaKelahiranUploaded >= totalParticipants &&
+    recommendationLetterStatus === "approved";
+
+  if (isCompleted) {
+    return { label: "Disetujui", className: "bg-green-100 text-green-700" };
+  }
+
+  if (totalParticipants <= 0) {
+    return { label: "Belum Mendaftar", className: "bg-app-surface-muted text-app-text-secondary" };
+  }
+
+  return { label: "Dalam Proses", className: "bg-amber-100 text-amber-700" };
 };
 
 const getParticipantStatusMeta = (status) => {
@@ -285,7 +310,8 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
     XLSX.writeFile(workbook, fileName);
   };
 
-  const statusMeta = getStatusMeta(detail?.statusSummary?.recommendationLetterStatus);
+  const recommendationStatusMeta = getRecommendationStatusMeta(detail?.statusSummary?.recommendationLetterStatus);
+  const registrationStatusMeta = getRegistrationStatusMeta(detail?.statusSummary);
 
   return (
     <SiteShell navigation={navigation}>
@@ -334,8 +360,8 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
           </div>
           <div className="rounded-xl border border-app-border bg-app-surface-muted px-4 py-3">
             <p className="text-xs uppercase tracking-wide text-app-text-secondary">Status Pendaftaran</p>
-            <span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusMeta.className}`}>
-              {statusMeta.label}
+            <span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${registrationStatusMeta.className}`}>
+              {registrationStatusMeta.label}
             </span>
           </div>
           <div className="rounded-xl border border-app-border bg-app-surface-muted px-4 py-3">
@@ -343,6 +369,12 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
             <p className="mt-1 text-lg font-semibold text-app-text-primary">
               {detail?.statusSummary?.approvedParticipants || 0}/{detail?.statusSummary?.totalParticipants || 0}
             </p>
+          </div>
+          <div className="rounded-xl border border-app-border bg-app-surface-muted px-4 py-3">
+            <p className="text-xs uppercase tracking-wide text-app-text-secondary">Status Surat Rekomendasi</p>
+            <span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${recommendationStatusMeta.className}`}>
+              {recommendationStatusMeta.label}
+            </span>
           </div>
         </div>
       </section>
@@ -537,8 +569,8 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
           {detail.recommendationLetter?.fileUrl ? (
             <div className="mt-4 space-y-3">
               <div className="flex flex-wrap items-center gap-3">
-                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusMeta.className}`}>
-                  {statusMeta.label}
+                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${recommendationStatusMeta.className}`}>
+                  {recommendationStatusMeta.label}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
