@@ -1,0 +1,376 @@
+package handler
+
+import (
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"eo-karate/internal/models"
+	"eo-karate/internal/response"
+	"eo-karate/internal/service"
+)
+
+// ParticipantHandler handles participant-related requests
+type ParticipantHandler struct {
+	participantService *service.ParticipantService
+}
+
+// NewParticipantHandler creates a new ParticipantHandler instance
+func NewParticipantHandler(participantService *service.ParticipantService) *ParticipantHandler {
+	return &ParticipantHandler{participantService: participantService}
+}
+
+// DownloadTemplate handles GET /api/v1/events/:id/participants/template
+// Returns an Excel template file for participants
+func (h *ParticipantHandler) DownloadTemplate(c *gin.Context) {
+	excelData, err := h.participantService.GenerateExcelTemplate()
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to generate template")
+		return
+	}
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=peserta-template.xlsx")
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", excelData)
+}
+
+// UploadParticipants handles POST /api/v1/events/:id/dojos/:dojoId/participants/upload
+// Parses Excel file and creates participants
+func (h *ParticipantHandler) UploadParticipants(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	// Get file from form
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "file is required")
+		return
+	}
+
+	// Read file content
+	src, err := file.Open()
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to open file")
+		return
+	}
+	defer src.Close()
+
+	excelData, err := io.ReadAll(src)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "failed to read file")
+		return
+	}
+
+	// Process Excel
+	participants, err := h.participantService.BulkCreateFromExcel(c.Request.Context(), eventID, dojoID, excelData)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.participantService.SaveUploadedParticipantsExcel(eventID, dojoID, file.Filename, excelData); err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to persist uploaded excel")
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "participants uploaded successfully", gin.H{
+		"count":        len(participants),
+		"participants": participants,
+	})
+}
+
+// GetUploadedParticipantsExcelPreview handles GET /api/v1/events/:id/dojos/:dojoId/participants/uploaded-excel-preview
+// Returns preview for the latest persisted uploaded participants Excel file.
+func (h *ParticipantHandler) GetUploadedParticipantsExcelPreview(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	preview, err := h.participantService.GetLatestUploadedParticipantsExcelPreview(eventID, dojoID, 8)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch uploaded excel preview")
+		return
+	}
+
+	if preview == nil {
+		response.Success(c, http.StatusOK, "uploaded excel preview not found", nil)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "uploaded excel preview retrieved", preview)
+}
+
+// GetParticipants handles GET /api/v1/events/:id/dojos/:dojoId/participants
+// Returns all participants for an event/dojo combination
+func (h *ParticipantHandler) GetParticipants(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	participants, err := h.participantService.GetParticipants(c.Request.Context(), eventID, dojoID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch participants")
+		return
+	}
+
+	response.Success(c, http.StatusOK, "participants retrieved", gin.H{
+		"meta": gin.H{
+			"count": len(participants),
+		},
+		"data": participants,
+	})
+}
+
+// GetStatusSummary handles GET /api/v1/events/:id/dojos/:dojoId/participants/status
+// Returns a summary of participant registration status
+func (h *ParticipantHandler) GetStatusSummary(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	summary, err := h.participantService.GetStatusSummary(c.Request.Context(), eventID, dojoID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch status summary")
+		return
+	}
+
+	response.Success(c, http.StatusOK, "status summary retrieved", summary)
+}
+
+// UploadDocument handles POST /api/v1/participants/:participantId/documents
+// Uploads a document for a participant
+func (h *ParticipantHandler) UploadDocument(c *gin.Context) {
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid participant id")
+		return
+	}
+
+	documentType := c.PostForm("document_type")
+	if documentType == "" {
+		response.Error(c, http.StatusBadRequest, "document_type is required")
+		return
+	}
+
+	// Get file from form
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "file is required")
+		return
+	}
+
+	safeFilename := filepath.Base(file.Filename)
+	relativePath := filepath.Join("uploads", "participants", participantID.String(), safeFilename)
+	if err := os.MkdirAll(filepath.Dir(relativePath), 0o755); err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to prepare upload directory")
+		return
+	}
+
+	if err := c.SaveUploadedFile(file, relativePath); err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to save file")
+		return
+	}
+
+	storedPath := "/" + strings.ReplaceAll(relativePath, string(filepath.Separator), "/")
+
+	input := models.UploadParticipantDocumentInput{
+		ParticipantID: participantID,
+		DocumentType:  documentType,
+		FilePath:      storedPath,
+	}
+
+	doc, err := h.participantService.CreateDocument(c.Request.Context(), input)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "document uploaded", doc)
+}
+
+// UploadRecommendationLetter handles POST /api/v1/events/:id/dojos/:dojoId/recommendation-letter
+// Uploads a recommendation letter from a dojo for an event
+func (h *ParticipantHandler) UploadRecommendationLetter(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	// Get file from form
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "file is required")
+		return
+	}
+
+	safeFilename := filepath.Base(file.Filename)
+	relativePath := filepath.Join("uploads", "recommendation_letters", eventID.String(), dojoID.String(), safeFilename)
+	if err := os.MkdirAll(filepath.Dir(relativePath), 0o755); err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to prepare upload directory")
+		return
+	}
+
+	if err := c.SaveUploadedFile(file, relativePath); err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to save file")
+		return
+	}
+
+	storedPath := "/" + strings.ReplaceAll(relativePath, string(filepath.Separator), "/")
+
+	input := models.UploadRecommendationLetterInput{
+		DojoID:   dojoID,
+		EventID:  eventID,
+		FilePath: storedPath,
+	}
+
+	letter, err := h.participantService.CreateRecommendationLetter(c.Request.Context(), input)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "recommendation letter uploaded", letter)
+}
+
+// GetRecommendationLetter handles GET /api/v1/events/:id/dojos/:dojoId/recommendation-letter
+// Returns persisted recommendation letter for a dojo and event.
+func (h *ParticipantHandler) GetRecommendationLetter(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	letter, err := h.participantService.GetRecommendationLetter(c.Request.Context(), eventID, dojoID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch recommendation letter")
+		return
+	}
+
+	if letter == nil {
+		response.Success(c, http.StatusOK, "recommendation letter not found", nil)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "recommendation letter retrieved", letter)
+}
+
+// DeleteParticipant handles DELETE /api/v1/events/:id/dojos/:dojoId/participants/:participantId
+// Deletes one participant if dojo registration has not been approved.
+func (h *ParticipantHandler) DeleteParticipant(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	participantID, err := uuid.Parse(c.Param("participantId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid participant id")
+		return
+	}
+
+	err = h.participantService.DeleteParticipantFromDojoRegistration(c.Request.Context(), eventID, dojoID, participantID)
+	if err != nil {
+		if strings.Contains(err.Error(), "already approved") {
+			response.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+
+		if strings.Contains(err.Error(), "not found") {
+			response.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
+
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, "participant deleted", gin.H{})
+}
+
+// DeleteDojoRegistration handles DELETE /api/v1/events/:id/dojos/:dojoId/registration
+// Deletes all dojo-level registration data if overall registration is not approved yet.
+func (h *ParticipantHandler) DeleteDojoRegistration(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	result, err := h.participantService.DeleteDojoRegistration(c.Request.Context(), eventID, dojoID)
+	if err != nil {
+		if strings.Contains(err.Error(), "already approved") {
+			response.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, "dojo registration deleted", result)
+}

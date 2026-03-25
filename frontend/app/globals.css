@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-app-bg: var(--app-color-bg);
+  --color-app-surface: var(--app-color-surface);
+  --color-app-surface-muted: var(--app-color-surface-muted);
+  --color-app-text-primary: var(--app-color-text-primary);
+  --color-app-text-secondary: var(--app-color-text-secondary);
+  --color-app-border: var(--app-color-border);
+  --color-app-accent: var(--app-color-accent);
+  --color-app-accent-contrast: var(--app-color-accent-contrast);
+  --color-app-danger: var(--app-color-danger);
+  --color-app-danger-contrast: var(--app-color-danger-contrast);
+  --font-sans: var(--app-font-sans);
+  --font-display: var(--app-font-display);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--app-color-bg);
+  color: var(--app-color-text-primary);
+  font-family: var(--app-font-sans);
+  background-image:
+    radial-gradient(
+      circle at 10% 10%,
+      color-mix(in srgb, var(--app-color-accent) 14%, transparent) 0%,
+      transparent 46%
+    ),
+    radial-gradient(
+      circle at 88% 12%,
+      color-mix(in srgb, var(--app-color-surface-muted) 86%, transparent) 0%,
+      transparent 54%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--app-color-surface) 72%, transparent),
+      transparent
+    );
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
