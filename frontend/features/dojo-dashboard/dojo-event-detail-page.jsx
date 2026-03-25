@@ -22,16 +22,17 @@ import {
 import { useToast } from "@/shared/components/toast-provider";
 
 const ChecklistItem = ({ label, value, status }) => {
-  const statusColor = status === "complete" ? "text-green-500" : "text-app-text-secondary";
-  const icon = status === "complete" ? "✓" : "○";
+  const isComplete = status === "complete";
 
   return (
-    <div className="flex items-center justify-between border-b border-app-border py-3">
-      <span className="text-sm text-app-text-primary">{label}</span>
-      <div className={`flex items-center gap-2 ${statusColor} font-semibold`}>
-        <span>{icon}</span>
-        <span>{value}</span>
+    <div className="rounded-2xl border border-app-border bg-app-surface-muted p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-widest text-app-text-secondary">{label}</span>
+        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${isComplete ? "bg-green-100 text-green-700" : "bg-app-surface text-app-text-secondary"}`}>
+          {isComplete ? "Selesai" : "Proses"}
+        </span>
       </div>
+      <p className="mt-3 text-sm font-semibold leading-snug text-app-text-primary">{value}</p>
     </div>
   );
 };
@@ -259,7 +260,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "peserta-template.xlsx";
+      a.download = "atlet-template.xlsx";
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -316,7 +317,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       setUploadProgress(100);
 
       setLastUploadedExcelPreview({
-        fileName: excelFile?.name || "file-peserta.xlsx",
+        fileName: excelFile?.name || "file-atlet.xlsx",
         headers: excelPreviewHeaders,
         rows: excelPreviewRows,
         uploaded_at: new Date().toISOString(),
@@ -329,7 +330,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       showToast({
         tone: "success",
         title: "Upload Successful",
-        message: `${result.count || 0} peserta berhasil diunggah`,
+        message: `${result.count || 0} atlet berhasil diunggah`,
       });
 
       await loadEventRegistrationData();
@@ -337,7 +338,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       showToast({
         tone: "error",
         title: "Upload Failed",
-        message: error?.message || "Gagal mengunggah peserta",
+        message: error?.message || "Gagal mengunggah data atlet",
       });
     } finally {
       setIsLoading(false);
@@ -512,7 +513,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       showToast({
         tone: "error",
         title: "Upload Failed",
-        message: error?.message || "Gagal mengunggah dokumen peserta",
+        message: error?.message || "Gagal mengunggah dokumen atlet",
       });
     } finally {
       setDocumentUploadMap((previousValue) => ({
@@ -609,7 +610,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       return;
     }
 
-    const isConfirmed = window.confirm(`Hapus peserta ${participantName || "ini"}? Data peserta dan dokumen terkait akan terhapus.`);
+    const isConfirmed = window.confirm(`Hapus atlet ${participantName || "ini"}? Data atlet dan dokumen terkait akan terhapus.`);
     if (!isConfirmed) {
       return;
     }
@@ -623,8 +624,8 @@ export function DojoEventDetailPage({ navigation, event }) {
       await deleteParticipantFromDojoRegistration(eventId, dojoId, participantId);
       showToast({
         tone: "success",
-        title: "Peserta Dihapus",
-        message: `${participantName || "Peserta"} berhasil dihapus dari pendaftaran dojo.`,
+        title: "Atlet Dihapus",
+        message: `${participantName || "Atlet"} berhasil dihapus dari pendaftaran dojo.`,
       });
 
       await loadEventRegistrationData();
@@ -632,7 +633,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       showToast({
         tone: "error",
         title: "Hapus Gagal",
-        message: error?.message || "Gagal menghapus peserta",
+        message: error?.message || "Gagal menghapus atlet",
       });
     } finally {
       setParticipantDeleteMap((previousValue) => ({
@@ -644,18 +645,20 @@ export function DojoEventDetailPage({ navigation, event }) {
 
   const hasParticipants = participants && participants.length > 0;
   const totalParticipants = statusSummary?.total_participants || 0;
+  const approvedParticipants = statusSummary?.approved_participants || 0;
   const uploadedSurkes = statusSummary?.surat_kesehatan_uploaded || 0;
   const uploadedAkta = statusSummary?.akta_kelahiran_uploaded || 0;
   const allDocumentsUploaded =
     totalParticipants > 0 &&
     uploadedSurkes >= totalParticipants &&
     uploadedAkta >= totalParticipants;
+  const allAthletsApproved = totalParticipants > 0 && approvedParticipants >= totalParticipants;
   const recommendationStatus = statusSummary?.recommendation_letter_status || "not_uploaded";
   const recommendationLabel = recommendationStatus === "approved"
-    ? "Approved"
+    ? "Disetujui"
     : recommendationStatus === "pending"
-      ? "Pending"
-      : "Belum Upload";
+      ? "Menunggu Persetujuan"
+      : "Belum Diupload";
   const recommendationLetterApproved = recommendationStatus === "approved";
   const recommendationUploadAllowed = allDocumentsUploaded && recommendationStatus !== "approved";
   const isDojoRegistrationApproved = recommendationStatus === "approved";
@@ -663,47 +666,50 @@ export function DojoEventDetailPage({ navigation, event }) {
   const recommendationFileUrl = resolveUploadedDocumentUrl(recommendationFilePath);
   const hasUploadedRecommendation = recommendationFilePath.length > 0;
   const uploadedRecommendationIsPdf = isPdfDocumentPath(recommendationFilePath);
+  const isRegistrationCompleted =
+    totalParticipants > 0 &&
+    allDocumentsUploaded &&
+    allAthletsApproved &&
+    recommendationLetterApproved;
+  const registrationStatusLabel = !hasParticipants
+    ? "Belum Mendaftar"
+    : isRegistrationCompleted
+      ? "Disetujui"
+      : "Dalam Proses";
   const registrationTabs = [
     {
       key: "status",
-      step: "Tahap 1",
-      shortLabel: "Status",
-      fullLabel: "Cek Status Pendaftaran",
+      step: "Ringkasan",
+      shortLabel: "Pendaftaran",
+      fullLabel: "Ringkasan Pendaftaran",
       disabled: false,
     },
     {
       key: "peserta",
-      step: "Tahap 2",
-      shortLabel: "Data Peserta",
-      fullLabel: "Upload Data Peserta (Excel)",
+      step: "Tahap 1",
+      shortLabel: "Data Atlet",
+      fullLabel: "Upload Data Atlet (Excel)",
       disabled: false,
     },
     {
       key: "dokumen",
-      step: "Tahap 3",
+      step: "Tahap 2",
       shortLabel: "Berkas Atlet",
-      fullLabel: "Upload Berkas Tiap Peserta",
+      fullLabel: "Upload Berkas Tiap Atlet",
       disabled: !hasParticipants,
     },
     {
       key: "rekomendasi",
-      step: "Tahap 4",
+      step: "Tahap 3",
       shortLabel: "Rekomendasi",
       fullLabel: "Upload Surat Rekomendasi Dojo",
-      disabled: !hasParticipants,
-    },
-    {
-      key: "data",
-      step: "Tahap 5",
-      shortLabel: "Ringkasan",
-      fullLabel: "Lihat Ringkasan Data Peserta",
       disabled: !hasParticipants,
     },
   ];
   const activeTabMeta = registrationTabs.find((tab) => tab.key === activeTab) || registrationTabs[0];
 
   useEffect(() => {
-    if (!hasParticipants && ["dokumen", "rekomendasi", "data"].includes(activeTab)) {
+    if (!hasParticipants && ["dokumen", "rekomendasi"].includes(activeTab)) {
       setActiveTab("peserta");
     }
   }, [activeTab, hasParticipants]);
@@ -738,15 +744,15 @@ export function DojoEventDetailPage({ navigation, event }) {
           </div>
         </header>
 
-        <section className="mb-8">
-          <h2 className="font-display text-xl font-semibold text-app-text-primary">Tahapan Pendaftaran</h2>
+        <section className="mb-6">
+          <h2 className="font-display text-xl font-semibold text-app-text-primary">Pendaftaran Dojo</h2>
           <p className="mt-2 text-sm text-app-text-secondary">
-            Pindah tab agar admin dojo fokus menyelesaikan satu tahap dalam satu waktu.
+            Pantau progres pendaftaran dojo dan kelengkapan data atlet dalam satu tempat.
           </p>
 
           <div className="mt-4 md:hidden">
             <label className="grid gap-2 text-sm text-app-text-secondary">
-              Pilih Tahap
+              Pilih Menu
               <select
                 value={activeTab}
                 onChange={(event) => setActiveTab(event.target.value)}
@@ -754,7 +760,7 @@ export function DojoEventDetailPage({ navigation, event }) {
               >
                 {registrationTabs.map((tab) => (
                   <option key={tab.key} value={tab.key} disabled={tab.disabled}>
-                    {`${tab.step} - ${tab.fullLabel}${tab.disabled ? " (Belum aktif)" : ""}`}
+                    {`${tab.fullLabel}${tab.disabled ? " (Belum aktif)" : ""}`}
                   </option>
                 ))}
               </select>
@@ -790,75 +796,132 @@ export function DojoEventDetailPage({ navigation, event }) {
             })}
           </div>
 
-          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-app-text-secondary">
-            {`${activeTabMeta.step} • ${activeTabMeta.fullLabel}`}
+          <p className="mt-2 text-xs font-semibold uppercase tracking-[0.12em] text-app-text-secondary">
+            {activeTabMeta.key === "status" ? activeTabMeta.fullLabel : `${activeTabMeta.step} • ${activeTabMeta.fullLabel}`}
           </p>
 
           <div className="mt-1 h-px w-full bg-app-border" />
-
-          <div className="mt-3 hidden xl:flex xl:flex-wrap xl:gap-2">
-            {registrationTabs.map((tab) => (
-              <span
-                key={`legend-${tab.key}`}
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${tab.disabled
-                  ? "bg-app-surface-muted text-app-text-secondary"
-                  : "bg-green-100 text-green-700"
-                }`}
-              >
-                {tab.disabled ? `${tab.fullLabel} (Belum Aktif)` : tab.fullLabel}
-              </span>
-            ))}
-          </div>
 
           <div className="mt-3 md:hidden">
             {registrationTabs
               .filter((tab) => tab.disabled)
               .map((tab) => (
                 <p key={`mobile-disabled-${tab.key}`} className="text-xs text-app-text-secondary">
-                  {`${tab.step} belum aktif sampai tahap sebelumnya selesai.`}
+                  {`${tab.fullLabel} belum aktif sampai tahap sebelumnya selesai.`}
                 </p>
               ))}
           </div>
 
           {!hasParticipants && (
             <p className="mt-3 text-xs text-app-text-secondary">
-              Tab Dokumen, Rekomendasi, dan Data Peserta aktif setelah data peserta berhasil diupload.
+              Tab Dokumen dan Rekomendasi aktif setelah data atlet berhasil diupload.
             </p>
           )}
         </section>
 
         {activeTab === "status" && (
           <section className="mb-8">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <ChecklistItem
-                label="Total Peserta"
-                value={statusSummary?.total_participants || 0}
-                status={hasParticipants ? "complete" : ""}
+                label="Status Pendaftaran"
+                value={registrationStatusLabel}
+                status={isRegistrationCompleted ? "complete" : ""}
               />
               <ChecklistItem
-                label="Surat Kesehatan"
-                value={`${statusSummary?.surat_kesehatan_uploaded || 0}/${statusSummary?.total_participants || 0}`}
-                status={allDocumentsUploaded ? "complete" : ""}
-              />
-              <ChecklistItem
-                label="Akta Kelahiran"
-                value={`${statusSummary?.akta_kelahiran_uploaded || 0}/${statusSummary?.total_participants || 0}`}
-                status={allDocumentsUploaded ? "complete" : ""}
+                label="Total Atlet"
+                value={totalParticipants > 0 ? `${approvedParticipants} dari ${totalParticipants} atlet disetujui` : "0"}
+                status={allAthletsApproved ? "complete" : ""}
               />
               <ChecklistItem
                 label="Surat Rekomendasi"
                 value={recommendationLabel}
                 status={recommendationLetterApproved ? "complete" : ""}
               />
+              <ChecklistItem
+                label="Surat Kesehatan"
+                value={totalParticipants > 0 ? `${uploadedSurkes} dari ${totalParticipants} telah diupload` : "0"}
+                status={allDocumentsUploaded ? "complete" : ""}
+              />
+              <ChecklistItem
+                label="Akta Kelahiran"
+                value={totalParticipants > 0 ? `${uploadedAkta} dari ${totalParticipants} telah diupload` : "0"}
+                status={allDocumentsUploaded ? "complete" : ""}
+              />
             </div>
+
+            {hasParticipants ? (
+              <div className="mt-6 max-h-[70vh] overflow-auto rounded-2xl border border-app-border">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-app-surface-muted text-app-text-primary">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">No</th>
+                      <th className="px-3 py-2 font-semibold">Nama Atlet</th>
+                      <th className="px-3 py-2 font-semibold">Tempat, Tgl Lahir</th>
+                      <th className="px-3 py-2 font-semibold">JK</th>
+                      <th className="px-3 py-2 font-semibold">Berat (kg)</th>
+                      <th className="px-3 py-2 font-semibold">Kategori Tanding</th>
+                      <th className="px-3 py-2 font-semibold">Kelas Tanding</th>
+                      <th className="px-3 py-2 font-semibold">Status Berkas</th>
+                      <th className="px-3 py-2 font-semibold">Status Atlet</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {participants.map((p, index) => {
+                      const participantId = p.uuid || p.id;
+                      const documentStatus = getParticipantDocumentStatus(p);
+                      const kategoriTanding = formatParticipantFieldList(p.kategori_tanding);
+                      const kelasTanding = formatParticipantFieldList(p.kelas_tanding);
+                      const tanggalLahir = typeof p.tanggal_lahir === "string" && p.tanggal_lahir.trim().length > 0 ? p.tanggal_lahir : "-";
+                      const tempatLahir = typeof p.tempat_lahir === "string" && p.tempat_lahir.trim().length > 0 ? p.tempat_lahir : "-";
+                      const beratBadan = Number.isFinite(Number(p.berat_badan)) ? Number(p.berat_badan) : null;
+
+                      return (
+                        <tr key={participantId} className="border-t border-app-border align-top">
+                          <td className="px-3 py-2 text-app-text-primary">{index + 1}</td>
+                          <td className="px-3 py-2 text-app-text-primary">
+                            <p className="font-semibold">{p.nama_lengkap || "-"}</p>
+                          </td>
+                          <td className="px-3 py-2 text-app-text-secondary">{`${tempatLahir}, ${tanggalLahir}`}</td>
+                          <td className="px-3 py-2 text-app-text-secondary">{formatGender(p.jenis_kelamin)}</td>
+                          <td className="px-3 py-2 text-app-text-secondary">{beratBadan === null ? "-" : beratBadan}</td>
+                          <td className="px-3 py-2 text-app-text-secondary">{kategoriTanding || "-"}</td>
+                          <td className="px-3 py-2 text-app-text-secondary">{kelasTanding || "-"}</td>
+                          <td className="px-3 py-2">
+                            <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${documentStatus.isComplete ? "bg-green-500 text-white" : "bg-red-100 text-red-700"}`}>
+                              {documentStatus.isComplete ? "Berkas Lengkap" : "Berkas Belum Lengkap"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            {p.status === "approved" ? (
+                              <span className="rounded-full bg-green-100 px-2 py-1 text-[11px] font-semibold text-green-700">
+                                Disetujui
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                                Menunggu Persetujuan
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-app-border bg-app-surface-muted p-4 text-sm text-app-text-secondary">
+                Belum ada data atlet untuk event ini.
+              </div>
+            )}
+
           </section>
         )}
 
         {activeTab === "peserta" && (
           <section className="space-y-4">
             <ActionBlock
-              title="Upload Data Peserta"
-              description="Download template lalu upload file Excel peserta pada area yang sama"
+              title="Upload Data Atlet"
+              description="Download template lalu upload file Excel atlet pada area yang sama"
               isActive={true}
               isCompleted={hasParticipants}
             >
@@ -867,7 +930,7 @@ export function DojoEventDetailPage({ navigation, event }) {
                   onClick={handleDownloadTemplate}
                   className="inline-flex items-center justify-center rounded-full border border-app-border bg-app-surface-muted px-4 py-2 text-sm font-semibold text-app-text-primary transition hover:border-app-accent hover:text-app-accent"
                 >
-                  Download Template Excel
+                  Download Template Atlet
                 </button>
 
                 <label className="grid gap-2 text-sm text-app-text-secondary">
@@ -932,7 +995,7 @@ export function DojoEventDetailPage({ navigation, event }) {
 
                 {!excelFile && lastUploadedExcelPreview && (
                   <div className="text-xs text-app-text-secondary">
-                    <p className="font-semibold text-app-text-primary">File Excel Terakhir Yang Sudah Diupload</p>
+                    <p className="font-semibold text-app-text-primary">File Excel Atlet Terakhir Yang Sudah Diupload</p>
                     <p className="mt-1 truncate whitespace-nowrap">{lastUploadedExcelPreview.fileName}</p>
 
                     {Array.isArray(lastUploadedExcelPreview.headers) && lastUploadedExcelPreview.headers.length > 0 && (
@@ -977,11 +1040,11 @@ export function DojoEventDetailPage({ navigation, event }) {
                   disabled={!excelFile || isLoading || !dojoId || !eventId}
                   className="inline-flex items-center justify-center rounded-full bg-app-accent px-4 py-2 text-sm font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isLoading ? `Uploading... ${uploadProgress}%` : "Upload Peserta"}
+                  {isLoading ? `Uploading... ${uploadProgress}%` : "Upload Atlet"}
                 </button>
                 {!dojoId && (
                   <p className="text-xs text-red-500">
-                    Dojo ID tidak ditemukan. Login ulang sebagai dojo admin untuk upload peserta.
+                    Dojo ID tidak ditemukan. Login ulang sebagai dojo admin untuk upload data atlet.
                   </p>
                 )}
               </div>
@@ -992,8 +1055,8 @@ export function DojoEventDetailPage({ navigation, event }) {
         {activeTab === "dokumen" && hasParticipants && (
           <section>
             <ActionBlock
-              title="Upload Dokumen Peserta"
-              description="Upload surat kesehatan dan akta kelahiran untuk setiap peserta"
+              title="Upload Dokumen Atlet"
+              description="Upload surat kesehatan dan akta kelahiran untuk setiap atlet"
               isActive={hasParticipants}
               isCompleted={allDocumentsUploaded}
             >
@@ -1001,7 +1064,7 @@ export function DojoEventDetailPage({ navigation, event }) {
                 <table className="min-w-245 w-full text-left text-xs">
                   <thead className="sticky top-0 bg-app-surface-muted text-app-text-primary">
                     <tr>
-                      <th className="px-3 py-2 font-semibold">Peserta</th>
+                      <th className="px-3 py-2 font-semibold">Atlet</th>
                       <th className="px-3 py-2 font-semibold">Surat Kesehatan</th>
                       <th className="px-3 py-2 font-semibold">Akta Kelahiran</th>
                       <th className="px-3 py-2 font-semibold">Aksi</th>
@@ -1180,7 +1243,7 @@ export function DojoEventDetailPage({ navigation, event }) {
                               disabled={isParticipantActionLocked}
                               className="inline-flex items-center justify-center rounded-full border border-red-500 px-3 py-1.5 text-xs font-semibold text-red-500 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {isDeletingParticipant ? "Menghapus..." : "Hapus Peserta"}
+                              {isDeletingParticipant ? "Menghapus..." : "Hapus Atlet"}
                             </button>
                           </td>
                         </tr>
@@ -1192,7 +1255,7 @@ export function DojoEventDetailPage({ navigation, event }) {
 
               {isDojoRegistrationApproved && (
                 <p className="mt-3 text-xs text-app-text-secondary">
-                  Pendaftaran dojo sudah approved, data peserta tidak dapat diubah atau dihapus.
+                  Pendaftaran dojo sudah approved, data atlet tidak dapat diubah atau dihapus.
                 </p>
               )}
             </ActionBlock>
@@ -1203,7 +1266,7 @@ export function DojoEventDetailPage({ navigation, event }) {
           <section>
             <ActionBlock
               title="Upload Surat Rekomendasi"
-              description="Upload surat rekomendasi dojo setelah dokumen peserta lengkap"
+              description="Upload surat rekomendasi dojo setelah dokumen atlet lengkap"
               isActive={allDocumentsUploaded}
               isCompleted={recommendationLetterApproved}
             >
@@ -1330,63 +1393,6 @@ export function DojoEventDetailPage({ navigation, event }) {
           </section>
         )}
 
-        {activeTab === "data" && hasParticipants && (
-          <section>
-            <ActionBlock
-              title="Ringkasan Data Peserta"
-              description={`Total ${participants.length} atlet terdaftar di dojo ini`}
-              isActive={true}
-              isCompleted={true}
-            >
-              <div className="max-h-[70vh] overflow-auto rounded-lg border border-app-border">
-                <table className="min-w-full text-left text-xs">
-                  <thead className="sticky top-0 bg-app-surface-muted text-app-text-primary">
-                    <tr>
-                      <th className="px-3 py-2 font-semibold">No</th>
-                      <th className="px-3 py-2 font-semibold">Nama Atlet</th>
-                      <th className="px-3 py-2 font-semibold">Tempat, Tgl Lahir</th>
-                      <th className="px-3 py-2 font-semibold">JK</th>
-                      <th className="px-3 py-2 font-semibold">Berat (kg)</th>
-                      <th className="px-3 py-2 font-semibold">Kategori Tanding</th>
-                      <th className="px-3 py-2 font-semibold">Kelas Tanding</th>
-                      <th className="px-3 py-2 font-semibold">Status Berkas</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {participants.map((p, index) => {
-                      const participantId = p.uuid || p.id;
-                      const documentStatus = getParticipantDocumentStatus(p);
-                      const kategoriTanding = formatParticipantFieldList(p.kategori_tanding);
-                      const kelasTanding = formatParticipantFieldList(p.kelas_tanding);
-                      const tanggalLahir = typeof p.tanggal_lahir === "string" && p.tanggal_lahir.trim().length > 0 ? p.tanggal_lahir : "-";
-                      const tempatLahir = typeof p.tempat_lahir === "string" && p.tempat_lahir.trim().length > 0 ? p.tempat_lahir : "-";
-                      const beratBadan = Number.isFinite(Number(p.berat_badan)) ? Number(p.berat_badan) : null;
-
-                      return (
-                        <tr key={participantId} className="border-t border-app-border align-top">
-                          <td className="px-3 py-2 text-app-text-primary">{index + 1}</td>
-                          <td className="px-3 py-2 text-app-text-primary">
-                            <p className="font-semibold">{p.nama_lengkap || "-"}</p>
-                          </td>
-                          <td className="px-3 py-2 text-app-text-secondary">{`${tempatLahir}, ${tanggalLahir}`}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{formatGender(p.jenis_kelamin)}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{beratBadan === null ? "-" : beratBadan}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{kategoriTanding || "-"}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{kelasTanding || "-"}</td>
-                          <td className="px-3 py-2">
-                            <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${documentStatus.isComplete ? "bg-green-500 text-white" : "bg-red-100 text-red-700"}`}>
-                              {documentStatus.isComplete ? "Berkas Lengkap" : "Berkas Belum Lengkap"}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </ActionBlock>
-          </section>
-        )}
       </section>
     </SiteShell>
   );
