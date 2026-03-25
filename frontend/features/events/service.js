@@ -92,6 +92,77 @@ const normalizeConfig = (rawValue = {}) => {
   };
 };
 
+const normalizeEventRegistrationDojo = (rawValue = {}) => {
+  return {
+    dojoId: normalizeText(rawValue.dojo_id),
+    dojoName: normalizeText(rawValue.dojo_name),
+    dojoLogoUrl: resolveAssetUrl(rawValue.dojo_logo_url),
+    totalAthletes: normalizeNumber(rawValue.total_athletes),
+    suratKesehatanUploaded: normalizeNumber(rawValue.surat_kesehatan_uploaded),
+    aktaKelahiranUploaded: normalizeNumber(rawValue.akta_kelahiran_uploaded),
+    recommendationLetterStatus: normalizeText(rawValue.recommendation_letter_status),
+    registeredAt: normalizeText(rawValue.registered_at),
+    updatedAt: normalizeText(rawValue.updated_at),
+  };
+};
+
+const normalizeParticipantDocument = (rawValue = {}) => {
+  return {
+    id: normalizeText(rawValue.uuid || rawValue.id),
+    participantId: normalizeText(rawValue.participant_id),
+    documentType: normalizeText(rawValue.document_type),
+    filePath: normalizeText(rawValue.file_path),
+    fileUrl: resolveAssetUrl(rawValue.file_path),
+    uploadedAt: normalizeText(rawValue.uploaded_at),
+    status: normalizeText(rawValue.status),
+  };
+};
+
+const normalizeEventDojoParticipant = (rawValue = {}) => {
+  const docs = Array.isArray(rawValue.documents) ? rawValue.documents : [];
+
+  return {
+    id: normalizeText(rawValue.uuid || rawValue.id),
+    dojoId: normalizeText(rawValue.dojo_id),
+    eventId: normalizeText(rawValue.event_id),
+    namaLengkap: normalizeText(rawValue.nama_lengkap),
+    tempatLahir: normalizeText(rawValue.tempat_lahir),
+    tanggalLahir: normalizeText(rawValue.tanggal_lahir),
+    jenisKelamin: normalizeText(rawValue.jenis_kelamin),
+    beratBadan: Number.isFinite(Number(rawValue.berat_badan)) ? Number(rawValue.berat_badan) : null,
+    kategoriTanding: rawValue.kategori_tanding,
+    kelasTanding: rawValue.kelas_tanding,
+    status: normalizeText(rawValue.status),
+    documents: docs.map((doc) => normalizeParticipantDocument(doc)),
+  };
+};
+
+const normalizeStatusSummary = (rawValue = {}) => {
+  return {
+    totalParticipants: normalizeNumber(rawValue.total_participants),
+    approvedParticipants: normalizeNumber(rawValue.approved_participants),
+    suratKesehatanUploaded: normalizeNumber(rawValue.surat_kesehatan_uploaded),
+    aktaKelahiranUploaded: normalizeNumber(rawValue.akta_kelahiran_uploaded),
+    recommendationLetterStatus: normalizeText(rawValue.recommendation_letter_status || "not_uploaded"),
+  };
+};
+
+const normalizeRecommendationLetter = (rawValue) => {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+
+  return {
+    id: normalizeText(rawValue.uuid || rawValue.id),
+    dojoId: normalizeText(rawValue.dojo_id),
+    eventId: normalizeText(rawValue.event_id),
+    filePath: normalizeText(rawValue.file_path),
+    fileUrl: resolveAssetUrl(rawValue.file_path),
+    uploadedAt: normalizeText(rawValue.uploaded_at),
+    status: normalizeText(rawValue.status),
+  };
+};
+
 const normalizeEvent = (rawValue = {}) => {
   const normalizedUuid = normalizeText(rawValue.uuid || rawValue.id);
 
@@ -214,4 +285,122 @@ export const deleteEvent = async (id) => {
 export const getEventById = async (id) => {
   const envelope = await apiClient.get(API_ENDPOINTS.eventById(id));
   return normalizeEvent(envelope?.data);
+};
+
+export const getEventRegistrationDojos = async (id) => {
+  const response = await fetch(`/api/events/${id}/registrations/dojos`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to fetch dojo registrations");
+  const rawItems = Array.isArray(envelope?.data?.items) ? envelope.data.items : [];
+
+  return rawItems.map((item) => normalizeEventRegistrationDojo(item));
+};
+
+export const getEventDojoRegistrationDetail = async (eventId, dojoId) => {
+  const [statusResponse, participantsResponse, recommendationResponse] = await Promise.all([
+    fetch(`/api/events/${eventId}/dojos/${dojoId}/participants/status`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    }),
+    fetch(`/api/events/${eventId}/dojos/${dojoId}/participants`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    }),
+    fetch(`/api/events/${eventId}/dojos/${dojoId}/recommendation-letter`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    }),
+  ]);
+
+  const [statusEnvelope, participantsEnvelope, recommendationEnvelope] = await Promise.all([
+    parseEnvelopeResponse(statusResponse, "Failed to fetch status summary"),
+    parseEnvelopeResponse(participantsResponse, "Failed to fetch participants"),
+    parseEnvelopeResponse(recommendationResponse, "Failed to fetch recommendation letter"),
+  ]);
+
+  const rawParticipants = Array.isArray(participantsEnvelope?.data?.data)
+    ? participantsEnvelope.data.data
+    : Array.isArray(participantsEnvelope?.data)
+      ? participantsEnvelope.data
+      : [];
+
+  return {
+    statusSummary: normalizeStatusSummary(statusEnvelope?.data || {}),
+    participants: rawParticipants.map((item) => normalizeEventDojoParticipant(item)),
+    recommendationLetter: normalizeRecommendationLetter(recommendationEnvelope?.data),
+  };
+};
+
+export const updateEventDojoRecommendationLetterStatus = async (eventId, dojoId, status) => {
+  if (!eventId || !dojoId) {
+    throw new Error("Event ID dan Dojo ID wajib diisi");
+  }
+
+  const normalizedStatus = normalizeText(status).trim().toLowerCase();
+  if (!["pending", "approved"].includes(normalizedStatus)) {
+    throw new Error("Status surat rekomendasi harus pending atau approved");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/dojos/${dojoId}/recommendation-letter/status`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: normalizedStatus }),
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to update recommendation letter status");
+  return normalizeRecommendationLetter(envelope?.data || {});
+};
+
+export const updateEventDojoParticipantStatus = async (eventId, dojoId, participantId, status) => {
+  if (!eventId || !dojoId || !participantId) {
+    throw new Error("Event ID, Dojo ID, dan Participant ID wajib diisi");
+  }
+
+  const normalizedStatus = normalizeText(status).trim().toLowerCase();
+  if (!["pending", "approved"].includes(normalizedStatus)) {
+    throw new Error("Status atlet harus pending atau approved");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/dojos/${dojoId}/participants/${participantId}/status`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: normalizedStatus }),
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to update participant status");
+  return normalizeEventDojoParticipant(envelope?.data || {});
+};
+
+export const deleteEventDojoParticipant = async (eventId, dojoId, participantId) => {
+  if (!eventId || !dojoId || !participantId) {
+    throw new Error("Event ID, Dojo ID, dan Participant ID wajib diisi");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/dojos/${dojoId}/participants/${participantId}`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
+
+  await parseEnvelopeResponse(response, "Failed to delete participant");
 };

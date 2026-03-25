@@ -15,5 +15,6 @@ export const ROUTES = Object.freeze({
   events: "/events",
   eventsCreate: "/events/create",
   eventsDetail: (id) => `/events/${id}`,
+  eventsRegistrationDojoDetail: (eventId, dojoId) => `/events/${eventId}/registrations/${dojoId}`,
   eventsEdit: (id) => `/events/${id}/edit`,
 });
