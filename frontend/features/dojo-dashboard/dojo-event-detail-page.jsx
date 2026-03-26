@@ -154,7 +154,7 @@ const isPdfDocumentPath = (filePath) => {
   return /\.pdf($|\?)/i.test(filePath);
 };
 
-const formatParticipantFieldList = (value) => {
+const parseParticipantFieldArray = (value) => {
   if (Array.isArray(value)) {
     return value
       .map((item) => {
@@ -170,29 +170,63 @@ const formatParticipantFieldList = (value) => {
 
         return String(item ?? "").trim();
       })
-      .filter((item) => item.length > 0)
-      .join(", ");
+      .filter((item) => item.length > 0);
   }
 
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (trimmed.length === 0) {
-      return "-";
+      return [];
     }
 
     try {
       const parsed = JSON.parse(trimmed);
       if (Array.isArray(parsed)) {
-        return formatParticipantFieldList(parsed) || "-";
+        return parseParticipantFieldArray(parsed);
       }
     } catch {
       // Keep original text when value is plain string.
     }
 
-    return trimmed;
+    return [trimmed];
   }
 
-  return "-";
+  return [];
+};
+
+const formatParticipantFieldList = (value) => {
+  const items = parseParticipantFieldArray(value);
+  return items.length > 0 ? items.join(", ") : "-";
+};
+
+const getKategoriUmurLabel = (tanggalLahirValue, eventStartValue) => {
+  if (!tanggalLahirValue) {
+    return "-";
+  }
+
+  const birthDate = new Date(tanggalLahirValue);
+  const referenceDate = eventStartValue ? new Date(eventStartValue) : new Date();
+
+  if (Number.isNaN(birthDate.getTime()) || Number.isNaN(referenceDate.getTime())) {
+    return "-";
+  }
+
+  let age = referenceDate.getUTCFullYear() - birthDate.getUTCFullYear();
+  const monthDelta = referenceDate.getUTCMonth() - birthDate.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && referenceDate.getUTCDate() < birthDate.getUTCDate())) {
+    age -= 1;
+  }
+
+  if (age >= 4 && age <= 5) return "Pra Usia Dini";
+  if (age >= 6 && age <= 7) return "Usia Dini";
+  if (age >= 8 && age <= 9) return "Pra-Pemula";
+  if (age >= 10 && age <= 11) return "Pemula";
+  if (age >= 12 && age <= 13) return "Kadet";
+  if (age >= 14 && age <= 15) return "Junior";
+  if (age >= 16 && age <= 20) return "U-21";
+  if (age >= 21) return "Senior";
+
+  return "Tidak Masuk Kategori";
 };
 
 const formatGender = (value) => {
@@ -418,7 +452,14 @@ export function DojoEventDetailPage({ navigation, event }) {
         return label.length > 0 ? label : `Kolom ${index + 1}`;
       });
 
-      const tanggalLahirColumnIndexes = headers
+      const visibleColumnIndexes = headers
+        .map((header, index) => ({ header, index }))
+        .filter((item) => !String(item.header || "").startsWith("__"))
+        .map((item) => item.index);
+
+      const visibleHeaders = visibleColumnIndexes.map((index) => headers[index]);
+
+      const tanggalLahirColumnIndexes = visibleHeaders
         .map((header, index) => ({ header, index }))
         .filter((item) => /tanggal/i.test(item.header))
         .map((item) => item.index);
@@ -427,16 +468,16 @@ export function DojoEventDetailPage({ navigation, event }) {
         .slice(1)
         .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim().length > 0))
         .slice(0, 8)
-        .map((row) => headers.map((_, index) => {
-          const cellValue = row[index] ?? "";
-          if (tanggalLahirColumnIndexes.includes(index)) {
+        .map((row) => visibleColumnIndexes.map((sourceIndex, visibleIndex) => {
+          const cellValue = row[sourceIndex] ?? "";
+          if (tanggalLahirColumnIndexes.includes(visibleIndex)) {
             return formatDateCellToIso(cellValue);
           }
 
           return String(cellValue);
         }));
 
-      setExcelPreviewHeaders(headers);
+      setExcelPreviewHeaders(visibleHeaders);
       setExcelPreviewRows(rows);
     } catch {
       setExcelPreviewError("Gagal membaca file Excel. Pastikan format file .xlsx/.xls valid.");
@@ -897,7 +938,7 @@ export function DojoEventDetailPage({ navigation, event }) {
 
             {hasParticipants ? (
               <div className="mt-6 max-h-[70vh] overflow-auto rounded-2xl border border-app-border">
-                <table className="min-w-full text-left text-xs">
+                <table className="min-w-295 w-full text-left text-xs">
                   <thead className="sticky top-0 bg-app-surface-muted text-app-text-primary">
                     <tr>
                       <th className="px-3 py-2 font-semibold">No</th>
@@ -915,23 +956,39 @@ export function DojoEventDetailPage({ navigation, event }) {
                     {participants.map((p, index) => {
                       const participantId = p.uuid || p.id;
                       const documentStatus = getParticipantDocumentStatus(p);
-                      const kategoriTanding = formatParticipantFieldList(p.kategori_tanding);
-                      const kelasTanding = formatParticipantFieldList(p.kelas_tanding);
+                      const kategoriTandingItems = parseParticipantFieldArray(p.kategori_tanding);
+                      const kelasTandingItems = parseParticipantFieldArray(p.kelas_tanding);
                       const tanggalLahir = typeof p.tanggal_lahir === "string" && p.tanggal_lahir.trim().length > 0 ? p.tanggal_lahir : "-";
                       const tempatLahir = typeof p.tempat_lahir === "string" && p.tempat_lahir.trim().length > 0 ? p.tempat_lahir : "-";
                       const beratBadan = Number.isFinite(Number(p.berat_badan)) ? Number(p.berat_badan) : null;
 
                       return (
-                        <tr key={participantId} className="border-t border-app-border align-top">
-                          <td className="px-3 py-2 text-app-text-primary">{index + 1}</td>
-                          <td className="px-3 py-2 text-app-text-primary">
+                        <tr key={participantId} className="border-t border-app-border align-middle">
+                          <td className="whitespace-nowrap px-3 py-2 text-app-text-primary">{index + 1}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-app-text-primary">
                             <p className="font-semibold">{p.nama_lengkap || "-"}</p>
                           </td>
-                          <td className="px-3 py-2 text-app-text-secondary">{`${tempatLahir}, ${tanggalLahir}`}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{formatGender(p.jenis_kelamin)}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{beratBadan === null ? "-" : beratBadan}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{kategoriTanding || "-"}</td>
-                          <td className="px-3 py-2 text-app-text-secondary">{kelasTanding || "-"}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-app-text-secondary">{`${tempatLahir}, ${tanggalLahir}`}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-app-text-secondary">{formatGender(p.jenis_kelamin)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-app-text-secondary">{beratBadan === null ? "-" : beratBadan}</td>
+                          <td className="px-3 py-2 text-app-text-secondary">
+                            {kategoriTandingItems.length > 1 ? (
+                              <ol className="list-decimal space-y-1 pl-4">
+                                {kategoriTandingItems.map((item, katIndex) => (
+                                  <li key={`${participantId}-kat-${katIndex}`} className="whitespace-nowrap leading-tight">{item}</li>
+                                ))}
+                              </ol>
+                            ) : kategoriTandingItems[0] ? <span className="whitespace-nowrap">{kategoriTandingItems[0]}</span> : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-app-text-secondary">
+                            {kelasTandingItems.length > 0 ? (
+                              <ol className="list-decimal space-y-1 pl-4">
+                                {kelasTandingItems.map((item, kelasIndex) => (
+                                  <li key={`${participantId}-kelas-${kelasIndex}`} className="leading-tight">{item}</li>
+                                ))}
+                              </ol>
+                            ) : "-"}
+                          </td>
                           <td className="px-3 py-2">
                             <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${documentStatus.isComplete ? "bg-green-500 text-white" : "bg-red-100 text-red-700"}`}>
                               {documentStatus.isComplete ? "Berkas Lengkap" : "Berkas Belum Lengkap"}
@@ -1106,8 +1163,8 @@ export function DojoEventDetailPage({ navigation, event }) {
               isActive={hasParticipants}
               isCompleted={allDocumentsUploaded}
             >
-              <div className="max-h-[70vh] overflow-auto rounded-lg border border-app-border">
-                <table className="min-w-245 w-full text-left text-xs">
+              <div className="max-h-[70vh] overflow-x-auto rounded-lg border border-app-border">
+                <table className="min-w-225 w-full text-left text-xs whitespace-nowrap">
                   <thead className="sticky top-0 bg-app-surface-muted text-app-text-primary">
                     <tr>
                       <th className="px-3 py-2 font-semibold">Atlet</th>
@@ -1132,11 +1189,21 @@ export function DojoEventDetailPage({ navigation, event }) {
                       const isDeletingParticipant = Boolean(participantDeleteMap[participantId]);
                       const isParticipantActionLocked = isDojoRegistrationApproved || isDeletingParticipant;
 
+                      const tanggalLahirFormatted = (() => {
+                            if (!p.tanggal_lahir || typeof p.tanggal_lahir !== "string") return "-";
+                            const d = new Date(p.tanggal_lahir);
+                            if (isNaN(d.getTime())) return p.tanggal_lahir;
+                            return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric" }).format(d);
+                          })();
+
                       return (
-                        <tr key={participantId} className="border-t border-app-border align-top">
-                          <td className="px-3 py-3 text-app-text-primary">
+                        <tr key={participantId} className="border-t border-app-border align-middle">
+                          <td className="whitespace-nowrap px-3 py-3 text-app-text-primary">
                             <p className="font-semibold">{p.nama_lengkap}</p>
-                            <p className="mt-1 text-app-text-secondary">{p.tanggal_lahir} | {p.jenis_kelamin}</p>
+                            <p className="mt-1 text-app-text-secondary">{tanggalLahirFormatted} | {p.jenis_kelamin}</p>
+                            <p className="mt-1 text-app-text-secondary">
+                              Kategori Umur: {getKategoriUmurLabel(p.tanggal_lahir, event?.time?.startAt || event?.time?.start_at)}
+                            </p>
                           </td>
 
                           <td className="px-3 py-3">

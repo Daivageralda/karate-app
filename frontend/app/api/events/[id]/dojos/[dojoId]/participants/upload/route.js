@@ -20,12 +20,22 @@ const buildResponse = async (backendResponse) => {
 export async function POST(request, context) {
   const { id, dojoId } = await context.params;
   const formData = await request.formData();
+  try {
+    const backendResponse = await fetch(buildBackendParticipantsUploadUrl(id, dojoId), {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
 
-  const backendResponse = await fetch(buildBackendParticipantsUploadUrl(id, dojoId), {
-    method: "POST",
-    body: formData,
-    cache: "no-store",
-  });
-
-  return buildResponse(backendResponse);
+    return buildResponse(backendResponse);
+  } catch {
+    return Response.json(
+      {
+        status: "error",
+        message: "failed to connect to backend upload service",
+        data: null,
+      },
+      { status: 502 }
+    );
+  }
 }

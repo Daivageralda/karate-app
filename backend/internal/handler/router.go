@@ -40,6 +40,10 @@ func New(healthHandler *HealthHandler, userHandler *UserHandler, dojoHandler *Do
 	api.GET("/events/:id/dojos/:dojoId/recommendation-letter", participantHandler.GetRecommendationLetter)
 	api.POST("/events/:id/dojos/:dojoId/recommendation-letter", participantHandler.UploadRecommendationLetter)
 	api.PUT("/events/:id/dojos/:dojoId/recommendation-letter/status", participantHandler.UpdateRecommendationLetterStatus)
+	api.GET("/events/:id/kelas-tanding", eventHandler.GetKelasTandingAssignments)
+	api.POST("/events/:id/kelas-tanding", eventHandler.AssignKelasTanding)
+	api.POST("/events/:id/kelas-tanding/bulk", eventHandler.AssignKelasTandingBulk)
+	api.DELETE("/events/:id/kelas-tanding/:kelasTandingId", eventHandler.UnassignKelasTanding)
 
 	// Kelas tanding routes
 	api.GET("/kelas-tanding", kelasTandingHandler.List)

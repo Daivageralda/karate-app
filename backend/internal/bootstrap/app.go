@@ -69,6 +69,7 @@ func NewApp(cfg config.Config) (*App, error) {
 	userDB := db.NewUserDB(dbPool)
 	dojoDB := db.NewDojoDB(dbPool)
 	eventDB := db.NewEventDB(dbPool)
+	eventKelasTandingDB := db.NewEventKelasTandingDB(dbPool)
 	participantDB := db.NewParticipantDB(dbPool)
 	kelasTandingDB := db.NewKelasTandingDB(dbPool)
 
@@ -80,14 +81,15 @@ func NewApp(cfg config.Config) (*App, error) {
 	userService := service.NewUserService(userDB, dojoDB)
 	dojoService := service.NewDojoService(dojoDB, cfg.UploadDir)
 	eventService := service.NewEventService(eventDB, cfg.UploadDir)
-	participantService := service.NewParticipantService(participantDB, cfg.UploadDir)
+	eventKelasTandingService := service.NewEventKelasTandingService(eventKelasTandingDB)
+	participantService := service.NewParticipantService(participantDB, eventDB, eventKelasTandingDB, cfg.UploadDir)
 	kelasTandingService := service.NewKelasTandingService(kelasTandingDB)
 
 	// Initialize handler layer
 	healthHandler := handler.NewHealthHandler()
 	userHandler := handler.NewUserHandler(userService)
 	dojoHandler := handler.NewDojoHandler(dojoService)
-	eventHandler := handler.NewEventHandler(eventService)
+	eventHandler := handler.NewEventHandler(eventService, eventKelasTandingService)
 	participantHandler := handler.NewParticipantHandler(participantService)
 	kelasTandingHandler := handler.NewKelasTandingHandler(kelasTandingService)
 	docsHandler := handler.NewDocsHandler()

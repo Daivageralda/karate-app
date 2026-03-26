@@ -92,6 +92,38 @@ const normalizeConfig = (rawValue = {}) => {
   };
 };
 
+const normalizeBatasBerat = (rawValue) => {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+
+  const bawah = Number(rawValue.bawah);
+  const atas = Number(rawValue.atas);
+
+  if (!Number.isFinite(bawah) || !Number.isFinite(atas)) {
+    return null;
+  }
+
+  return { bawah, atas };
+};
+
+const normalizeEventKelasTanding = (rawValue = {}) => {
+  const normalizedUuid = normalizeText(rawValue.uuid || rawValue.id);
+
+  return {
+    id: normalizedUuid,
+    uuid: normalizedUuid,
+    nama: normalizeText(rawValue.nama),
+    jenis: normalizeText(rawValue.jenis),
+    kategori: normalizeText(rawValue.kategori),
+    jenisKelamin: normalizeText(rawValue.jenis_kelamin),
+    batasBerat: normalizeBatasBerat(rawValue.batas_berat),
+    isAssigned: Boolean(rawValue.is_assigned),
+    createdAt: normalizeText(rawValue.created_at),
+    updatedAt: normalizeText(rawValue.updated_at),
+  };
+};
+
 const normalizeEventRegistrationDojo = (rawValue = {}) => {
   return {
     dojoId: normalizeText(rawValue.dojo_id),
@@ -438,4 +470,96 @@ export const deleteEventDojoParticipant = async (eventId, dojoId, participantId)
   });
 
   await parseEnvelopeResponse(response, "Failed to delete participant");
+};
+
+export const getEventKelasTandingAssignments = async (eventId) => {
+  if (!eventId) {
+    throw new Error("Event ID wajib diisi");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/kelas-tanding`, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to fetch event kelas tanding assignments");
+  const assignedItems = Array.isArray(envelope?.data?.assigned_items) ? envelope.data.assigned_items : [];
+  const unassignedItems = Array.isArray(envelope?.data?.unassigned_items) ? envelope.data.unassigned_items : [];
+
+  return {
+    assignedItems: assignedItems.map((item) => normalizeEventKelasTanding(item)),
+    unassignedItems: unassignedItems.map((item) => normalizeEventKelasTanding(item)),
+  };
+};
+
+export const assignEventKelasTanding = async (eventId, kelasTandingId) => {
+  if (!eventId || !kelasTandingId) {
+    throw new Error("Event ID dan Kelas Tanding ID wajib diisi");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/kelas-tanding`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ kelas_tanding_id: kelasTandingId }),
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to assign kelas tanding to event");
+  const assignedItems = Array.isArray(envelope?.data?.assigned_items) ? envelope.data.assigned_items : [];
+  const unassignedItems = Array.isArray(envelope?.data?.unassigned_items) ? envelope.data.unassigned_items : [];
+
+  return {
+    assignedItems: assignedItems.map((item) => normalizeEventKelasTanding(item)),
+    unassignedItems: unassignedItems.map((item) => normalizeEventKelasTanding(item)),
+  };
+};
+
+export const bulkAssignEventKelasTanding = async (eventId, kelasTandingIds) => {
+  if (!eventId) {
+    throw new Error("Event ID wajib diisi");
+  }
+
+  if (!Array.isArray(kelasTandingIds) || kelasTandingIds.length === 0) {
+    throw new Error("Pilih minimal satu kelas tanding");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/kelas-tanding/bulk`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ kelas_tanding_ids: kelasTandingIds }),
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to bulk assign kelas tanding to event");
+  const assignedItems = Array.isArray(envelope?.data?.assigned_items) ? envelope.data.assigned_items : [];
+  const unassignedItems = Array.isArray(envelope?.data?.unassigned_items) ? envelope.data.unassigned_items : [];
+
+  return {
+    assignedItems: assignedItems.map((item) => normalizeEventKelasTanding(item)),
+    unassignedItems: unassignedItems.map((item) => normalizeEventKelasTanding(item)),
+  };
+};
+
+export const unassignEventKelasTanding = async (eventId, kelasTandingId) => {
+  if (!eventId || !kelasTandingId) {
+    throw new Error("Event ID dan Kelas Tanding ID wajib diisi");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/kelas-tanding/${kelasTandingId}`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to unassign kelas tanding from event");
+  const assignedItems = Array.isArray(envelope?.data?.assigned_items) ? envelope.data.assigned_items : [];
+  const unassignedItems = Array.isArray(envelope?.data?.unassigned_items) ? envelope.data.unassigned_items : [];
+
+  return {
+    assignedItems: assignedItems.map((item) => normalizeEventKelasTanding(item)),
+    unassignedItems: unassignedItems.map((item) => normalizeEventKelasTanding(item)),
+  };
 };

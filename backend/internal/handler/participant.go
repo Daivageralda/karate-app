@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,14 +34,20 @@ func NewParticipantHandler(participantService *service.ParticipantService) *Part
 // DownloadTemplate handles GET /api/v1/events/:id/participants/template
 // Returns an Excel template file for participants
 func (h *ParticipantHandler) DownloadTemplate(c *gin.Context) {
-	excelData, err := h.participantService.GenerateExcelTemplate()
+	eventID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "failed to generate template")
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	excelData, err := h.participantService.GenerateExcelTemplate(c.Request.Context(), eventID)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-	c.Header("Content-Disposition", "attachment; filename=peserta-template.xlsx")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=peserta-template-%s.xlsx", eventID.String()))
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", excelData)
 }
 
@@ -246,6 +253,11 @@ func (h *ParticipantHandler) UploadDocument(c *gin.Context) {
 		return
 	}
 
+	if err := validateDocumentMIME(file); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	safeFilename := filepath.Base(file.Filename)
 	relativePath := filepath.Join("uploads", "participants", participantID.String(), safeFilename)
 	if err := os.MkdirAll(filepath.Dir(relativePath), 0o755); err != nil {
@@ -294,6 +306,11 @@ func (h *ParticipantHandler) UploadRecommendationLetter(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "file is required")
+		return
+	}
+
+	if err := validateDocumentMIME(file); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -509,4 +526,28 @@ func (h *ParticipantHandler) DeleteDojoRegistration(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, "dojo registration deleted", result)
+}
+
+// validateDocumentMIME reads the first 512 bytes of an uploaded file and rejects
+// anything that is not a PDF or a supported image type (JPEG, PNG).
+func validateDocumentMIME(file *multipart.FileHeader) error {
+	f, err := file.Open()
+	if err != nil {
+		return fmt.Errorf("unable to open file")
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, err := io.ReadAtLeast(f, buf, 1)
+	if err != nil {
+		return fmt.Errorf("unable to read file")
+	}
+
+	mime := http.DetectContentType(buf[:n])
+	switch mime {
+	case "application/pdf", "image/jpeg", "image/png":
+		return nil
+	default:
+		return fmt.Errorf("file type not allowed: only PDF, JPEG, and PNG are accepted")
+	}
 }

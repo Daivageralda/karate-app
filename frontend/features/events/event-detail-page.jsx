@@ -5,7 +5,14 @@ import Link from "next/link";
 
 import { SiteShell } from "@/shared/components/site-shell";
 import { ROUTES } from "@/shared/config/routes";
-import { downloadEventRegistrationDojosExcel, getEventRegistrationDojos } from "@/features/events/service";
+import {
+  assignEventKelasTanding,
+  bulkAssignEventKelasTanding,
+  downloadEventRegistrationDojosExcel,
+  getEventKelasTandingAssignments,
+  getEventRegistrationDojos,
+  unassignEventKelasTanding,
+} from "@/features/events/service";
 import { formatDateTime, formatText } from "@/shared/utils/formatters";
 
 const EVENT_DETAIL_TABS = [
@@ -17,7 +24,47 @@ const EVENT_DETAIL_TABS = [
     key: "registrations",
     label: "Pendaftaran Dojo",
   },
+  {
+    key: "kelas-tanding-settings",
+    label: "Pengaturan Kelas Tanding",
+  },
 ];
+
+const KATEGORI_LABELS = {
+  pra_usia_dini: "Pra Usia Dini",
+  usia_dini: "Usia Dini",
+  pra_pemula: "Pra Pemula",
+  pemula: "Pemula",
+  kadet: "Kadet",
+  junior: "Junior",
+  under_21: "Under 21",
+  senior: "Senior",
+  veteran: "Veteran",
+};
+
+const getBatasBeratLabel = (item) => {
+  if (item?.jenis !== "kumite") {
+    return "-";
+  }
+
+  const batasBerat = item?.batasBerat;
+  if (!batasBerat || typeof batasBerat !== "object") {
+    return "-";
+  }
+
+  const bawah = Number(batasBerat.bawah);
+  const atas = Number(batasBerat.atas);
+
+  if (!Number.isFinite(bawah) || !Number.isFinite(atas)) {
+    return "-";
+  }
+
+  if (bawah <= 0) {
+    return `s/d ${atas} kg`;
+  }
+
+  return `${bawah} - ${atas} kg`;
+};
 
 const toMegabytes = (bytes) => {
   if (typeof bytes !== "number" || bytes <= 0) {
@@ -158,6 +205,14 @@ export function EventDetailPage({ navigation, event }) {
   const [isExportingRegistrations, setIsExportingRegistrations] = useState(false);
   const [registrationError, setRegistrationError] = useState("");
   const [hasLoadedRegistrations, setHasLoadedRegistrations] = useState(false);
+  const [assignedKelasTanding, setAssignedKelasTanding] = useState([]);
+  const [unassignedKelasTanding, setUnassignedKelasTanding] = useState([]);
+  const [selectedBulkKelasTandingIds, setSelectedBulkKelasTandingIds] = useState([]);
+  const [isKelasTandingLoading, setIsKelasTandingLoading] = useState(false);
+  const [kelasTandingError, setKelasTandingError] = useState("");
+  const [hasLoadedKelasTanding, setHasLoadedKelasTanding] = useState(false);
+  const [isBulkAssigningKelasTanding, setIsBulkAssigningKelasTanding] = useState(false);
+  const [singleKelasTandingActionId, setSingleKelasTandingActionId] = useState("");
 
   useEffect(() => {
     let isCancelled = false;
@@ -194,9 +249,132 @@ export function EventDetailPage({ navigation, event }) {
     };
   }, [activeTab, event?.id, hasLoadedRegistrations]);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (activeTab !== "kelas-tanding-settings" || !event?.id || hasLoadedKelasTanding) {
+      return undefined;
+    }
+
+    const loadKelasTandingAssignments = async () => {
+      setIsKelasTandingLoading(true);
+      setKelasTandingError("");
+
+      try {
+        const assignmentResult = await getEventKelasTandingAssignments(event.id);
+        if (!isCancelled) {
+          setAssignedKelasTanding(assignmentResult.assignedItems);
+          setUnassignedKelasTanding(assignmentResult.unassignedItems);
+          setSelectedBulkKelasTandingIds([]);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setKelasTandingError(error?.message || "Gagal memuat pengaturan kelas tanding event");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsKelasTandingLoading(false);
+          setHasLoadedKelasTanding(true);
+        }
+      }
+    };
+
+    loadKelasTandingAssignments();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeTab, event?.id, hasLoadedKelasTanding]);
+
   const handleRetryLoadRegistrations = () => {
     setHasLoadedRegistrations(false);
     setRegistrationError("");
+  };
+
+  const handleRetryLoadKelasTanding = () => {
+    setHasLoadedKelasTanding(false);
+    setKelasTandingError("");
+  };
+
+  const handleToggleBulkKelasTanding = (kelasTandingId, isChecked) => {
+    if (!kelasTandingId) {
+      return;
+    }
+
+    setSelectedBulkKelasTandingIds((prevValue) => {
+      if (isChecked) {
+        return prevValue.includes(kelasTandingId) ? prevValue : [...prevValue, kelasTandingId];
+      }
+
+      return prevValue.filter((itemId) => itemId !== kelasTandingId);
+    });
+  };
+
+  const handleAssignSingleKelasTanding = async (kelasTandingId) => {
+    if (!event?.id || !kelasTandingId) {
+      setKelasTandingError("Event ID atau Kelas Tanding ID tidak ditemukan");
+      return;
+    }
+
+    setKelasTandingError("");
+    setSingleKelasTandingActionId(kelasTandingId);
+
+    try {
+      const assignmentResult = await assignEventKelasTanding(event.id, kelasTandingId);
+      setAssignedKelasTanding(assignmentResult.assignedItems);
+      setUnassignedKelasTanding(assignmentResult.unassignedItems);
+      setSelectedBulkKelasTandingIds((prevValue) => prevValue.filter((itemId) => itemId !== kelasTandingId));
+    } catch (error) {
+      setKelasTandingError(error?.message || "Gagal assign kelas tanding ke event");
+    } finally {
+      setSingleKelasTandingActionId("");
+    }
+  };
+
+  const handleUnassignSingleKelasTanding = async (kelasTandingId) => {
+    if (!event?.id || !kelasTandingId) {
+      setKelasTandingError("Event ID atau Kelas Tanding ID tidak ditemukan");
+      return;
+    }
+
+    setKelasTandingError("");
+    setSingleKelasTandingActionId(kelasTandingId);
+
+    try {
+      const assignmentResult = await unassignEventKelasTanding(event.id, kelasTandingId);
+      setAssignedKelasTanding(assignmentResult.assignedItems);
+      setUnassignedKelasTanding(assignmentResult.unassignedItems);
+    } catch (error) {
+      setKelasTandingError(error?.message || "Gagal melepas kelas tanding dari event");
+    } finally {
+      setSingleKelasTandingActionId("");
+    }
+  };
+
+  const handleBulkAssignKelasTanding = async () => {
+    if (!event?.id) {
+      setKelasTandingError("Event ID tidak ditemukan");
+      return;
+    }
+
+    if (selectedBulkKelasTandingIds.length === 0) {
+      setKelasTandingError("Pilih minimal satu kelas tanding untuk bulk assign");
+      return;
+    }
+
+    setKelasTandingError("");
+    setIsBulkAssigningKelasTanding(true);
+
+    try {
+      const assignmentResult = await bulkAssignEventKelasTanding(event.id, selectedBulkKelasTandingIds);
+      setAssignedKelasTanding(assignmentResult.assignedItems);
+      setUnassignedKelasTanding(assignmentResult.unassignedItems);
+      setSelectedBulkKelasTandingIds([]);
+    } catch (error) {
+      setKelasTandingError(error?.message || "Gagal bulk assign kelas tanding ke event");
+    } finally {
+      setIsBulkAssigningKelasTanding(false);
+    }
   };
 
   const handleDownloadDojoRegistrationsExcel = async () => {
@@ -396,7 +574,7 @@ export function EventDetailPage({ navigation, event }) {
             )}
           </section>
         </>
-      ) : (
+      ) : activeTab === "registrations" ? (
         <section className="rounded-3xl border border-app-border bg-app-surface p-6 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -513,6 +691,140 @@ export function EventDetailPage({ navigation, event }) {
                 </tbody>
               </table>
             </div>
+          ) : null}
+        </section>
+      ) : (
+        <section className="rounded-3xl border border-app-border bg-app-surface p-6 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="font-display text-xl font-semibold tracking-tight text-app-text-primary">Pengaturan Kelas Tanding</h2>
+              <p className="mt-2 text-sm text-app-text-secondary">
+                Assign master kelas tanding ke event ini secara bulk maupun satu per satu.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-full border border-app-border bg-app-surface-muted px-4 py-2 text-sm font-semibold text-app-text-primary">
+                Assigned: {assignedKelasTanding.length}
+              </div>
+              <div className="rounded-full border border-app-border bg-app-surface-muted px-4 py-2 text-sm font-semibold text-app-text-primary">
+                Tersedia: {unassignedKelasTanding.length}
+              </div>
+            </div>
+          </div>
+
+          {isKelasTandingLoading ? (
+            <p className="mt-6 text-sm text-app-text-secondary">Memuat pengaturan kelas tanding event...</p>
+          ) : null}
+
+          {!isKelasTandingLoading && kelasTandingError ? (
+            <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4">
+              <p className="text-sm font-medium text-red-700">{kelasTandingError}</p>
+              <button
+                type="button"
+                onClick={handleRetryLoadKelasTanding}
+                className="mt-3 inline-flex items-center justify-center rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+              >
+                Coba Lagi
+              </button>
+            </div>
+          ) : null}
+
+          {!isKelasTandingLoading && !kelasTandingError ? (
+            <>
+              <div className="mt-6 rounded-2xl border border-app-border bg-app-surface-muted p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-app-text-secondary">
+                    Pilih kelas tanding yang belum ter-assign, lalu assign sekaligus ke event.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handleBulkAssignKelasTanding}
+                    disabled={isBulkAssigningKelasTanding || selectedBulkKelasTandingIds.length === 0}
+                    className="inline-flex items-center justify-center rounded-full border border-app-accent bg-app-accent px-4 py-2 text-sm font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isBulkAssigningKelasTanding ? "Memproses Bulk Assign..." : `Bulk Assign (${selectedBulkKelasTandingIds.length})`}
+                  </button>
+                </div>
+              </div>
+
+              {assignedKelasTanding.length === 0 && unassignedKelasTanding.length === 0 ? (
+                <div className="mt-6 rounded-2xl border border-dashed border-app-border bg-app-surface-muted px-4 py-8 text-center text-sm text-app-text-secondary">
+                  Belum ada master kelas tanding yang bisa di-assign.
+                </div>
+              ) : (
+                <div className="mt-6 overflow-auto rounded-2xl border border-app-border">
+                  <table className="min-w-max w-full text-left text-sm">
+                    <thead className="bg-app-surface-muted text-app-text-primary">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Pilih</th>
+                        <th className="px-4 py-3 font-semibold">Nama</th>
+                        <th className="px-4 py-3 font-semibold">Jenis</th>
+                        <th className="px-4 py-3 font-semibold">Kategori</th>
+                        <th className="px-4 py-3 font-semibold">Jenis Kelamin</th>
+                        <th className="px-4 py-3 font-semibold">Batas Berat</th>
+                        <th className="px-4 py-3 font-semibold">Status Assign</th>
+                        <th className="px-4 py-3 font-semibold">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...assignedKelasTanding, ...unassignedKelasTanding].map((item) => {
+                        const isAssigned = item.isAssigned;
+                        const isLoadingAction = singleKelasTandingActionId === item.id;
+                        const isSelectable = !isAssigned;
+                        const isChecked = selectedBulkKelasTandingIds.includes(item.id);
+
+                        return (
+                          <tr key={item.id} className="border-t border-app-border align-top">
+                            <td className="px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                disabled={!isSelectable || isBulkAssigningKelasTanding || isLoadingAction}
+                                onChange={(eventItem) => handleToggleBulkKelasTanding(item.id, eventItem.target.checked)}
+                                className="h-4 w-4 rounded border-app-border text-app-accent focus:ring-app-accent"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-app-text-primary font-semibold">{formatText(item.nama)}</td>
+                            <td className="px-4 py-3 text-app-text-secondary">{formatText(item.jenis).toUpperCase()}</td>
+                            <td className="px-4 py-3 text-app-text-secondary">{KATEGORI_LABELS[item.kategori] || formatText(item.kategori)}</td>
+                            <td className="px-4 py-3 text-app-text-secondary">{formatText(item.jenisKelamin)}</td>
+                            <td className="px-4 py-3 text-app-text-secondary">{getBatasBeratLabel(item)}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${isAssigned ? "bg-green-100 text-green-700" : "bg-app-surface-muted text-app-text-secondary"}`}>
+                                {isAssigned ? "Assigned" : "Belum Assigned"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              {isAssigned ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnassignSingleKelasTanding(item.id)}
+                                  disabled={isLoadingAction || isBulkAssigningKelasTanding}
+                                  className="inline-flex whitespace-nowrap rounded-full border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isLoadingAction ? "Melepas..." : "Unassign"}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssignSingleKelasTanding(item.id)}
+                                  disabled={isLoadingAction || isBulkAssigningKelasTanding}
+                                  className="inline-flex whitespace-nowrap rounded-full border border-app-accent bg-app-accent px-3 py-1.5 text-xs font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isLoadingAction ? "Assign..." : "Assign"}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           ) : null}
         </section>
       )}

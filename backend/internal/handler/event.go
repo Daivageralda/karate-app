@@ -19,12 +19,16 @@ import (
 
 // EventHandler handles event-related requests
 type EventHandler struct {
-	eventService *service.EventService
+	eventService             *service.EventService
+	eventKelasTandingService *service.EventKelasTandingService
 }
 
 // NewEventHandler creates a new EventHandler instance
-func NewEventHandler(eventService *service.EventService) *EventHandler {
-	return &EventHandler{eventService: eventService}
+func NewEventHandler(eventService *service.EventService, eventKelasTandingService *service.EventKelasTandingService) *EventHandler {
+	return &EventHandler{
+		eventService:             eventService,
+		eventKelasTandingService: eventKelasTandingService,
+	}
 }
 
 // Create handles POST /api/v1/events
@@ -222,4 +226,110 @@ func (h *EventHandler) GetByID(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, "event detail", event)
+}
+
+// GetKelasTandingAssignments handles GET /api/v1/events/:id/kelas-tanding
+func (h *EventHandler) GetKelasTandingAssignments(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	assignments, err := h.eventKelasTandingService.GetAssignments(c.Request.Context(), eventID)
+	if err != nil {
+		switch {
+		case errors.Is(err, models.ErrNotFound):
+			response.Error(c, http.StatusNotFound, "event not found")
+		default:
+			response.Error(c, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, "event kelas tanding assignments", assignments)
+}
+
+// AssignKelasTanding handles POST /api/v1/events/:id/kelas-tanding
+func (h *EventHandler) AssignKelasTanding(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	var input models.AssignEventKelasTandingInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	assignments, err := h.eventKelasTandingService.AssignOne(c.Request.Context(), eventID, input.KelasTandingID)
+	if err != nil {
+		switch {
+		case errors.Is(err, models.ErrNotFound):
+			response.Error(c, http.StatusNotFound, "event not found")
+		default:
+			response.Error(c, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, "kelas tanding assigned to event", assignments)
+}
+
+// AssignKelasTandingBulk handles POST /api/v1/events/:id/kelas-tanding/bulk
+func (h *EventHandler) AssignKelasTandingBulk(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	var input models.AssignBulkEventKelasTandingInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	assignments, err := h.eventKelasTandingService.AssignBulk(c.Request.Context(), eventID, input.KelasTandingIDs)
+	if err != nil {
+		switch {
+		case errors.Is(err, models.ErrNotFound):
+			response.Error(c, http.StatusNotFound, "event not found")
+		default:
+			response.Error(c, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, "kelas tanding assigned to event", assignments)
+}
+
+// UnassignKelasTanding handles DELETE /api/v1/events/:id/kelas-tanding/:kelasTandingId
+func (h *EventHandler) UnassignKelasTanding(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	kelasTandingID, err := uuid.Parse(c.Param("kelasTandingId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid kelas tanding id")
+		return
+	}
+
+	assignments, err := h.eventKelasTandingService.UnassignOne(c.Request.Context(), eventID, kelasTandingID)
+	if err != nil {
+		switch {
+		case errors.Is(err, models.ErrNotFound):
+			response.Error(c, http.StatusNotFound, "event not found")
+		default:
+			response.Error(c, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, "kelas tanding unassigned from event", assignments)
 }
