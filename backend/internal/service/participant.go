@@ -335,8 +335,8 @@ func (s *ParticipantService) GenerateEventRegistrationDojosExcel(
 	}
 
 	headerStyleID, err := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "#FFFFFF"},
-		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#1E4E79"}},
+		Font:      &excelize.Font{Bold: true, Color: "#FFFFFF"},
+		Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#1E4E79"}},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
 		Border: []excelize.Border{
 			{Type: "left", Color: "#D9D9D9", Style: 1},
@@ -364,7 +364,7 @@ func (s *ParticipantService) GenerateEventRegistrationDojosExcel(
 
 	bodyAltStyleID, err := f.NewStyle(&excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
-		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#F7FAFC"}},
+		Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#F7FAFC"}},
 		Border: []excelize.Border{
 			{Type: "left", Color: "#D9D9D9", Style: 1},
 			{Type: "top", Color: "#D9D9D9", Style: 1},

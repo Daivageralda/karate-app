@@ -41,6 +41,16 @@ func DecodeDojoCursor(cursor string) (time.Time, uuid.UUID, error) {
 	return decodeTimeUUID(cursor)
 }
 
+// EncodeKelasTandingCursor encodes kelas_tanding pagination cursor
+func EncodeKelasTandingCursor(createdAt time.Time, id uuid.UUID) string {
+	return encodeTimeUUID(createdAt, id)
+}
+
+// DecodeKelasTandingCursor decodes kelas_tanding pagination cursor
+func DecodeKelasTandingCursor(cursor string) (time.Time, uuid.UUID, error) {
+	return decodeTimeUUID(cursor)
+}
+
 func encodeTimeUUID(ts time.Time, id uuid.UUID) string {
 	payload := ts.UTC().Format(time.RFC3339Nano) + "|" + id.String()
 	return base64.RawURLEncoding.EncodeToString([]byte(payload))

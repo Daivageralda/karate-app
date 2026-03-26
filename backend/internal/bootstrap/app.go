@@ -70,6 +70,7 @@ func NewApp(cfg config.Config) (*App, error) {
 	dojoDB := db.NewDojoDB(dbPool)
 	eventDB := db.NewEventDB(dbPool)
 	participantDB := db.NewParticipantDB(dbPool)
+	kelasTandingDB := db.NewKelasTandingDB(dbPool)
 
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create upload directory: %w", err)
@@ -80,6 +81,7 @@ func NewApp(cfg config.Config) (*App, error) {
 	dojoService := service.NewDojoService(dojoDB, cfg.UploadDir)
 	eventService := service.NewEventService(eventDB, cfg.UploadDir)
 	participantService := service.NewParticipantService(participantDB, cfg.UploadDir)
+	kelasTandingService := service.NewKelasTandingService(kelasTandingDB)
 
 	// Initialize handler layer
 	healthHandler := handler.NewHealthHandler()
@@ -87,10 +89,11 @@ func NewApp(cfg config.Config) (*App, error) {
 	dojoHandler := handler.NewDojoHandler(dojoService)
 	eventHandler := handler.NewEventHandler(eventService)
 	participantHandler := handler.NewParticipantHandler(participantService)
+	kelasTandingHandler := handler.NewKelasTandingHandler(kelasTandingService)
 	docsHandler := handler.NewDocsHandler()
 
 	// Create router
-	engine := handler.New(healthHandler, userHandler, dojoHandler, eventHandler, participantHandler, docsHandler)
+	engine := handler.New(healthHandler, userHandler, dojoHandler, eventHandler, participantHandler, kelasTandingHandler, docsHandler)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

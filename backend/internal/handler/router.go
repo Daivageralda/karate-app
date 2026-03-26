@@ -5,7 +5,7 @@ import (
 )
 
 // New creates a new router with all handlers
-func New(healthHandler *HealthHandler, userHandler *UserHandler, dojoHandler *DojoHandler, eventHandler *EventHandler, participantHandler *ParticipantHandler, docsHandler *DocsHandler) *gin.Engine {
+func New(healthHandler *HealthHandler, userHandler *UserHandler, dojoHandler *DojoHandler, eventHandler *EventHandler, participantHandler *ParticipantHandler, kelasTandingHandler *KelasTandingHandler, docsHandler *DocsHandler) *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Logger(), gin.Recovery())
 	engine.MaxMultipartMemory = 64 << 20
@@ -40,6 +40,13 @@ func New(healthHandler *HealthHandler, userHandler *UserHandler, dojoHandler *Do
 	api.GET("/events/:id/dojos/:dojoId/recommendation-letter", participantHandler.GetRecommendationLetter)
 	api.POST("/events/:id/dojos/:dojoId/recommendation-letter", participantHandler.UploadRecommendationLetter)
 	api.PUT("/events/:id/dojos/:dojoId/recommendation-letter/status", participantHandler.UpdateRecommendationLetterStatus)
+
+	// Kelas tanding routes
+	api.GET("/kelas-tanding", kelasTandingHandler.List)
+	api.POST("/kelas-tanding", kelasTandingHandler.Create)
+	api.GET("/kelas-tanding/:id", kelasTandingHandler.GetByID)
+	api.PUT("/kelas-tanding/:id", kelasTandingHandler.Update)
+	api.DELETE("/kelas-tanding/:id", kelasTandingHandler.Delete)
 
 	// Generic event routes (less specific, register AFTER participant routes)
 	api.GET("/events", eventHandler.List)
