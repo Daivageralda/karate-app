@@ -39,6 +39,11 @@ const navigationSuperAdmin = {
           label: "Dojos",
           href: "/dojos",
         },
+        {
+          id: "nav-kelas-tanding",
+          label: "Kelas Tanding",
+          href: "/kelas-tanding",
+        },
       ],
     },
   ],
@@ -296,6 +301,46 @@ export const PAGE_COPY = Object.freeze({
         },
         {
           id: "events-column-actions",
+          label: "Aksi",
+          key: "actions",
+        },
+      ],
+    },
+    kelasTanding: {
+      title: "Kelas Tanding",
+      description:
+        "Master data kelas tanding untuk kategori kata dan kumite, dilengkapi batas berat badan dan jenis kelamin.",
+      route: "/kelas-tanding",
+      endpoint: "GET /api/v1/kelas-tanding",
+      emptyMessage: "Belum ada kelas tanding dari backend.",
+      columns: [
+        {
+          id: "kelas-tanding-column-nama",
+          label: "Nama",
+          key: "nama",
+        },
+        {
+          id: "kelas-tanding-column-jenis",
+          label: "Jenis",
+          key: "jenis",
+        },
+        {
+          id: "kelas-tanding-column-kategori",
+          label: "Kategori",
+          key: "kategori",
+        },
+        {
+          id: "kelas-tanding-column-jenis-kelamin",
+          label: "Jenis Kelamin",
+          key: "jenisKelamin",
+        },
+        {
+          id: "kelas-tanding-column-batas-berat",
+          label: "Batas Berat (kg)",
+          key: "batasBerat",
+        },
+        {
+          id: "kelas-tanding-column-actions",
           label: "Aksi",
           key: "actions",
         },

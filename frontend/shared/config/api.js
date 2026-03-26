@@ -7,6 +7,7 @@ const RESOURCE_PATHS = Object.freeze({
   users: "/users",
   dojos: "/dojos",
   events: "/events",
+  kelasTanding: "/kelas-tanding",
 });
 
 export const API_ENDPOINTS = Object.freeze({
@@ -19,4 +20,6 @@ export const API_ENDPOINTS = Object.freeze({
   dojoById: (id) => `${API_VERSION_PREFIX}${RESOURCE_PATHS.dojos}/${id}`,
   events: `${API_VERSION_PREFIX}${RESOURCE_PATHS.events}`,
   eventById: (id) => `${API_VERSION_PREFIX}${RESOURCE_PATHS.events}/${id}`,
+  kelasTanding: `${API_VERSION_PREFIX}${RESOURCE_PATHS.kelasTanding}`,
+  kelasTandingById: (id) => `${API_VERSION_PREFIX}${RESOURCE_PATHS.kelasTanding}/${id}`,
 });
