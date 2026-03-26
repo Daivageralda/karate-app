@@ -303,6 +303,40 @@ export const getEventRegistrationDojos = async (id) => {
   return rawItems.map((item) => normalizeEventRegistrationDojo(item));
 };
 
+export const downloadEventRegistrationDojosExcel = async (id) => {
+  if (!id) {
+    throw new Error("Event ID wajib diisi");
+  }
+
+  const response = await fetch(`/api/events/${id}/registrations/dojos/export`, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    let message = "Failed to download dojo registrations excel";
+
+    if (responseText) {
+      try {
+        const envelope = JSON.parse(responseText);
+        if (typeof envelope?.message === "string" && envelope.message.trim().length > 0) {
+          message = envelope.message;
+        }
+      } catch {
+        // Keep fallback message when body is not JSON.
+      }
+    }
+
+    throw new Error(message);
+  }
+
+  return {
+    blob: await response.blob(),
+    contentDisposition: response.headers.get("content-disposition") || "",
+  };
+};
+
 export const getEventDojoRegistrationDetail = async (eventId, dojoId) => {
   const [statusResponse, participantsResponse, recommendationResponse] = await Promise.all([
     fetch(`/api/events/${eventId}/dojos/${dojoId}/participants/status`, {

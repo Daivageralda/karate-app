@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { SiteShell } from "@/shared/components/site-shell";
 import { ROUTES } from "@/shared/config/routes";
-import { getEventRegistrationDojos } from "@/features/events/service";
+import { downloadEventRegistrationDojosExcel, getEventRegistrationDojos } from "@/features/events/service";
 import { formatDateTime, formatText } from "@/shared/utils/formatters";
 
 const EVENT_DETAIL_TABS = [
@@ -155,6 +155,7 @@ export function EventDetailPage({ navigation, event }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [registrationDojos, setRegistrationDojos] = useState([]);
   const [isRegistrationLoading, setIsRegistrationLoading] = useState(false);
+  const [isExportingRegistrations, setIsExportingRegistrations] = useState(false);
   const [registrationError, setRegistrationError] = useState("");
   const [hasLoadedRegistrations, setHasLoadedRegistrations] = useState(false);
 
@@ -196,6 +197,47 @@ export function EventDetailPage({ navigation, event }) {
   const handleRetryLoadRegistrations = () => {
     setHasLoadedRegistrations(false);
     setRegistrationError("");
+  };
+
+  const handleDownloadDojoRegistrationsExcel = async () => {
+    if (!event?.id) {
+      setRegistrationError("Event ID tidak ditemukan");
+      return;
+    }
+
+    if (registrationDojos.length === 0) {
+      setRegistrationError("Belum ada dojo yang mendaftar untuk didownload");
+      return;
+    }
+
+    setRegistrationError("");
+    setIsExportingRegistrations(true);
+
+    try {
+      const { blob, contentDisposition } = await downloadEventRegistrationDojosExcel(event.id);
+      const fallbackEventName = (formatText(event?.name) || "event")
+        .replace(/[^a-zA-Z0-9-_ ]/g, "")
+        .trim()
+        .replace(/\s+/g, "-")
+        .toLowerCase();
+      const fallbackName = `pendaftaran-dojo-${fallbackEventName || "event"}.xlsx`;
+
+      const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const fileName = fileNameMatch?.[1] || fallbackName;
+
+      const fileUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = fileUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(fileUrl);
+    } catch (error) {
+      setRegistrationError(error?.message || "Gagal menyiapkan file Excel pendaftaran dojo");
+    } finally {
+      setIsExportingRegistrations(false);
+    }
   };
 
   return (
@@ -364,8 +406,18 @@ export function EventDetailPage({ navigation, event }) {
               </p>
             </div>
 
-            <div className="rounded-full border border-app-border bg-app-surface-muted px-4 py-2 text-sm font-semibold text-app-text-primary">
-              {registrationDojos.length} dojo
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-full border border-app-border bg-app-surface-muted px-4 py-2 text-sm font-semibold text-app-text-primary">
+                {registrationDojos.length} dojo
+              </div>
+              <button
+                type="button"
+                onClick={handleDownloadDojoRegistrationsExcel}
+                disabled={isRegistrationLoading || isExportingRegistrations || registrationDojos.length === 0}
+                className="inline-flex items-center justify-center rounded-full border border-app-border bg-app-surface-muted px-4 py-2 text-sm font-semibold text-app-text-primary transition hover:border-app-accent hover:text-app-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isExportingRegistrations ? "Menyiapkan Excel..." : "Download Excel"}
+              </button>
             </div>
           </div>
 
