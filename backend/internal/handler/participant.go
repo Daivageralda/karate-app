@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -176,6 +177,27 @@ func (h *ParticipantHandler) ListEventRegistrationDojos(c *gin.Context) {
 			"count": len(items),
 		},
 	})
+}
+
+// DownloadEventRegistrationDojosExcel handles GET /api/v1/events/:id/registrations/dojos/export
+// Returns merged dojo registration participant data as an Excel file.
+func (h *ParticipantHandler) DownloadEventRegistrationDojosExcel(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	excelData, err := h.participantService.GenerateEventRegistrationDojosExcel(c.Request.Context(), eventID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to generate dojo registration excel")
+		return
+	}
+
+	fileName := fmt.Sprintf("pendaftaran-dojo-%s.xlsx", eventID.String())
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", excelData)
 }
 
 // GetStatusSummary handles GET /api/v1/events/:id/dojos/:dojoId/participants/status

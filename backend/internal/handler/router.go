@@ -29,6 +29,7 @@ func New(healthHandler *HealthHandler, userHandler *UserHandler, dojoHandler *Do
 	// Participant routes (more specific, register BEFORE generic event routes)
 	api.GET("/events/:id/participants/template", participantHandler.DownloadTemplate)
 	api.GET("/events/:id/registrations/dojos", participantHandler.ListEventRegistrationDojos)
+	api.GET("/events/:id/registrations/dojos/export", participantHandler.DownloadEventRegistrationDojosExcel)
 	api.POST("/events/:id/dojos/:dojoId/participants/upload", participantHandler.UploadParticipants)
 	api.GET("/events/:id/dojos/:dojoId/participants/uploaded-excel-preview", participantHandler.GetUploadedParticipantsExcelPreview)
 	api.GET("/events/:id/dojos/:dojoId/participants", participantHandler.GetParticipants)

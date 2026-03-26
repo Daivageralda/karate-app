@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -253,6 +254,200 @@ func (s *ParticipantService) ListEventRegistrationDojos(
 	}
 
 	return items, nil
+}
+
+// GenerateEventRegistrationDojosExcel generates a merged Excel for all dojo registrations in an event.
+func (s *ParticipantService) GenerateEventRegistrationDojosExcel(
+	ctx context.Context,
+	eventID uuid.UUID,
+) ([]byte, error) {
+	if eventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	dojos, err := s.participantDB.ListEventRegistrationDojos(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+
+	sheetName := "Pendaftaran Dojo"
+	if err := f.SetSheetName("Sheet1", sheetName); err != nil {
+		return nil, fmt.Errorf("set sheet name: %w", err)
+	}
+
+	headers := []string{
+		"Nama Atlet",
+		"Tempat Lahir",
+		"Tanggal Lahir",
+		"Jenis Kelamin",
+		"Berat Badan (kg)",
+		"Kategori",
+		"Kelas Tanding",
+	}
+
+	for idx, header := range headers {
+		cell, _ := excelize.CoordinatesToCellName(idx+1, 1)
+		if err := f.SetCellValue(sheetName, cell, header); err != nil {
+			return nil, fmt.Errorf("set header cell: %w", err)
+		}
+	}
+
+	currentRow := 2
+	for _, dojo := range dojos {
+		participants, err := s.participantDB.GetByEventAndDojo(ctx, eventID, dojo.DojoID)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(participants) == 0 {
+			continue
+		}
+
+		for _, participant := range participants {
+			values := []any{
+				participant.NamaLengkap,
+				participant.TempatLahir,
+				participant.TanggalLahir,
+				participant.JenisKelamin,
+				participant.BeratBadan,
+				formatParticipantJSONList(participant.KategoriTanding),
+				formatParticipantJSONList(participant.KelasTanding),
+			}
+
+			for colIdx, val := range values {
+				cell, _ := excelize.CoordinatesToCellName(colIdx+1, currentRow)
+				if err := f.SetCellValue(sheetName, cell, val); err != nil {
+					return nil, fmt.Errorf("set participant row: %w", err)
+				}
+			}
+
+			currentRow++
+		}
+	}
+
+	lastColName, _ := excelize.ColumnNumberToName(len(headers))
+	lastRow := currentRow - 1
+	if lastRow < 1 {
+		lastRow = 1
+	}
+
+	headerStyleID, err := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true, Color: "#FFFFFF"},
+		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#1E4E79"}},
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
+		Border: []excelize.Border{
+			{Type: "left", Color: "#D9D9D9", Style: 1},
+			{Type: "top", Color: "#D9D9D9", Style: 1},
+			{Type: "right", Color: "#D9D9D9", Style: 1},
+			{Type: "bottom", Color: "#D9D9D9", Style: 1},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create header style: %w", err)
+	}
+
+	bodyStyleID, err := f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+		Border: []excelize.Border{
+			{Type: "left", Color: "#D9D9D9", Style: 1},
+			{Type: "top", Color: "#D9D9D9", Style: 1},
+			{Type: "right", Color: "#D9D9D9", Style: 1},
+			{Type: "bottom", Color: "#D9D9D9", Style: 1},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create body style: %w", err)
+	}
+
+	bodyAltStyleID, err := f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#F7FAFC"}},
+		Border: []excelize.Border{
+			{Type: "left", Color: "#D9D9D9", Style: 1},
+			{Type: "top", Color: "#D9D9D9", Style: 1},
+			{Type: "right", Color: "#D9D9D9", Style: 1},
+			{Type: "bottom", Color: "#D9D9D9", Style: 1},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create alternate body style: %w", err)
+	}
+
+	if err := f.SetCellStyle(sheetName, "A1", fmt.Sprintf("%s1", lastColName), headerStyleID); err != nil {
+		return nil, fmt.Errorf("apply header style: %w", err)
+	}
+
+	if lastRow >= 2 {
+		for row := 2; row <= lastRow; row++ {
+			startCell := fmt.Sprintf("A%d", row)
+			endCell := fmt.Sprintf("%s%d", lastColName, row)
+			styleID := bodyStyleID
+			if row%2 == 0 {
+				styleID = bodyAltStyleID
+			}
+			if err := f.SetCellStyle(sheetName, startCell, endCell, styleID); err != nil {
+				return nil, fmt.Errorf("apply row style: %w", err)
+			}
+		}
+	}
+
+	if err := f.SetRowHeight(sheetName, 1, 24); err != nil {
+		return nil, fmt.Errorf("set header row height: %w", err)
+	}
+
+	for row := 2; row <= lastRow; row++ {
+		if err := f.SetRowHeight(sheetName, row, 20); err != nil {
+			return nil, fmt.Errorf("set body row height: %w", err)
+		}
+	}
+
+	if err := f.SetColWidth(sheetName, "A", "A", 28); err != nil {
+		return nil, fmt.Errorf("set column width A: %w", err)
+	}
+	if err := f.SetColWidth(sheetName, "B", "B", 20); err != nil {
+		return nil, fmt.Errorf("set column width B: %w", err)
+	}
+	if err := f.SetColWidth(sheetName, "C", "C", 14); err != nil {
+		return nil, fmt.Errorf("set column width C: %w", err)
+	}
+	if err := f.SetColWidth(sheetName, "D", "D", 16); err != nil {
+		return nil, fmt.Errorf("set column width D: %w", err)
+	}
+	if err := f.SetColWidth(sheetName, "E", "E", 14); err != nil {
+		return nil, fmt.Errorf("set column width E: %w", err)
+	}
+	if err := f.SetColWidth(sheetName, "F", "G", 28); err != nil {
+		return nil, fmt.Errorf("set column width F-G: %w", err)
+	}
+
+	if err := f.SetPanes(sheetName, &excelize.Panes{
+		Freeze:      true,
+		Split:       false,
+		XSplit:      0,
+		YSplit:      1,
+		TopLeftCell: "A2",
+		ActivePane:  "bottomLeft",
+		Selection: []excelize.Selection{
+			{SQRef: "A2", ActiveCell: "A2", Pane: "bottomLeft"},
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("set frozen header pane: %w", err)
+	}
+
+	autoFilterRange := fmt.Sprintf("A1:%s%d", lastColName, lastRow)
+	if err := f.AutoFilter(sheetName, autoFilterRange, nil); err != nil {
+		return nil, fmt.Errorf("apply autofilter: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		return nil, fmt.Errorf("write export excel: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 // DeleteDojoRegistration deletes dojo registration data for an event if not approved yet.
@@ -577,6 +772,7 @@ func parseExcelPreview(excelData []byte, maxRows int) ([]string, [][]string, err
 
 	firstRow := rows[0]
 	headers := make([]string, len(firstRow))
+	tanggalColumnIndex := -1
 	for idx, value := range firstRow {
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
@@ -584,6 +780,9 @@ func parseExcelPreview(excelData []byte, maxRows int) ([]string, [][]string, err
 			continue
 		}
 		headers[idx] = trimmed
+		if strings.Contains(strings.ToLower(trimmed), "tanggal") {
+			tanggalColumnIndex = idx
+		}
 	}
 
 	previewRows := make([][]string, 0, maxRows)
@@ -604,7 +803,15 @@ func parseExcelPreview(excelData []byte, maxRows int) ([]string, [][]string, err
 		normalized := make([]string, len(headers))
 		for idx := range headers {
 			if idx < len(row) {
-				normalized[idx] = row[idx]
+				cellValue := row[idx]
+				if idx == tanggalColumnIndex {
+					normalizedDate, normalizeErr := normalizeBirthDate(cellValue)
+					if normalizeErr == nil {
+						normalized[idx] = normalizedDate
+						continue
+					}
+				}
+				normalized[idx] = cellValue
 			}
 		}
 
@@ -680,10 +887,12 @@ func parseExcelRow(row []string, idx excelColumnIndex) (models.ParticipantRow, e
 	pr.TanggalLahir = getValue(row, idx.TanggalLahir)
 	pr.JenisKelamin = getValue(row, idx.JenisKelamin)
 
-	// Validate tanggal_lahir format
-	if _, err := time.Parse("2006-01-02", pr.TanggalLahir); err != nil {
-		return pr, fmt.Errorf("invalid tanggal_lahir format: must be YYYY-MM-DD")
+	// Accept YYYY-MM-DD, DD/MM/YYYY, and Excel serial date formats.
+	normalizedDate, dateErr := normalizeBirthDate(pr.TanggalLahir)
+	if dateErr != nil {
+		return pr, fmt.Errorf("invalid tanggal_lahir format: gunakan YYYY-MM-DD, DD/MM/YYYY, atau nilai tanggal Excel")
 	}
+	pr.TanggalLahir = normalizedDate
 
 	// Parse berat badan
 	beratStr := getValue(row, idx.BeratBadan)
@@ -743,6 +952,114 @@ func parseCommaSeparated(s string) []string {
 		}
 	}
 	return result
+}
+
+func formatParticipantJSONList(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "-"
+	}
+
+	var asStrings []string
+	if err := json.Unmarshal(raw, &asStrings); err == nil {
+		clean := make([]string, 0, len(asStrings))
+		for _, value := range asStrings {
+			value = strings.TrimSpace(value)
+			if value != "" {
+				clean = append(clean, value)
+			}
+		}
+		if len(clean) > 0 {
+			return strings.Join(clean, ", ")
+		}
+	}
+
+	var asObjects []map[string]any
+	if err := json.Unmarshal(raw, &asObjects); err == nil {
+		clean := make([]string, 0, len(asObjects))
+		for _, obj := range asObjects {
+			if label, ok := obj["label"].(string); ok && strings.TrimSpace(label) != "" {
+				clean = append(clean, strings.TrimSpace(label))
+				continue
+			}
+			if id, ok := obj["id"].(string); ok && strings.TrimSpace(id) != "" {
+				clean = append(clean, strings.TrimSpace(id))
+			}
+		}
+		if len(clean) > 0 {
+			return strings.Join(clean, ", ")
+		}
+	}
+
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "-"
+	}
+
+	return trimmed
+}
+
+func normalizeBirthDate(rawValue string) (string, error) {
+	value := strings.TrimSpace(rawValue)
+	if value == "" {
+		return "", fmt.Errorf("empty date")
+	}
+
+	// Remove common time suffixes emitted by spreadsheet/date formatting.
+	if strings.Contains(value, "T") {
+		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+			return parsed.Format("2006-01-02"), nil
+		}
+	}
+	value = strings.TrimSpace(strings.Split(value, " ")[0])
+
+	layouts := []string{
+		"2006-01-02",
+		"2006/01/02",
+		"2006-1-2",
+		"2006/1/2",
+		"02/01/2006",
+		"2/1/2006",
+		"01/02/2006", // MM/DD/YYYY
+		"1/2/2006",   // M/D/YYYY
+		"02-01-2006",
+		"2-1-2006",
+		"01-02-2006", // MM-DD-YYYY
+		"1-2-2006",   // M-D-YYYY
+		"02.01.2006",
+		"2.1.2006",
+		"02/01/06",
+		"2/1/06",
+		"01/02/06",
+		"1/2/06",
+		"02-01-06",
+		"2-1-06",
+		"01-02-06",
+		"1-2-06",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"02/01/2006 15:04:05",
+		"02/01/2006 15:04",
+		"01/02/2006 15:04:05",
+		"01/02/2006 15:04",
+	}
+
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed.Format("2006-01-02"), nil
+		}
+	}
+
+	if serial, err := strconv.ParseFloat(value, 64); err == nil && serial > 0 {
+		parsed, convertErr := excelize.ExcelDateToTime(serial, false)
+		if convertErr == nil {
+			return parsed.Format("2006-01-02"), nil
+		}
+	}
+
+	return "", fmt.Errorf("unsupported date format")
 }
 
 func isValidDocumentType(docType string) bool {
