@@ -81,6 +81,40 @@ const formatFileSize = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 };
 
+const formatDateCellToIso = (value) => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  const asNumber = typeof value === "number" ? value : Number.parseFloat(String(value));
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    const excelEpochUtcMs = Date.UTC(1899, 11, 30);
+    const dateUtcMs = excelEpochUtcMs + Math.floor(asNumber) * 24 * 60 * 60 * 1000;
+    const date = new Date(dateUtcMs);
+    if (!Number.isNaN(date.getTime())) {
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(date.getUTCDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return "";
+  }
+
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const day = String(Number.parseInt(slashMatch[1], 10)).padStart(2, "0");
+    const month = String(Number.parseInt(slashMatch[2], 10)).padStart(2, "0");
+    const year = slashMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  return raw;
+};
+
 const getUploadedParticipantDocument = (participant, documentType) => {
   const docs = Array.isArray(participant?.documents) ? participant.documents : [];
   return docs.find((doc) => doc?.document_type === documentType) || null;
@@ -384,11 +418,23 @@ export function DojoEventDetailPage({ navigation, event }) {
         return label.length > 0 ? label : `Kolom ${index + 1}`;
       });
 
+      const tanggalLahirColumnIndexes = headers
+        .map((header, index) => ({ header, index }))
+        .filter((item) => /tanggal/i.test(item.header))
+        .map((item) => item.index);
+
       const rows = sheetRows
         .slice(1)
         .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim().length > 0))
         .slice(0, 8)
-        .map((row) => headers.map((_, index) => String(row[index] ?? "")));
+        .map((row) => headers.map((_, index) => {
+          const cellValue = row[index] ?? "";
+          if (tanggalLahirColumnIndexes.includes(index)) {
+            return formatDateCellToIso(cellValue);
+          }
+
+          return String(cellValue);
+        }));
 
       setExcelPreviewHeaders(headers);
       setExcelPreviewRows(rows);
