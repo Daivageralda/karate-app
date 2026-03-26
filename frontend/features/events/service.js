@@ -98,6 +98,7 @@ const normalizeEventRegistrationDojo = (rawValue = {}) => {
     dojoName: normalizeText(rawValue.dojo_name),
     dojoLogoUrl: resolveAssetUrl(rawValue.dojo_logo_url),
     totalAthletes: normalizeNumber(rawValue.total_athletes),
+    approvedAthletes: normalizeNumber(rawValue.approved_athletes),
     suratKesehatanUploaded: normalizeNumber(rawValue.surat_kesehatan_uploaded),
     aktaKelahiranUploaded: normalizeNumber(rawValue.akta_kelahiran_uploaded),
     recommendationLetterStatus: normalizeText(rawValue.recommendation_letter_status),

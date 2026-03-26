@@ -141,6 +141,7 @@ type EventRegistrationDojo struct {
 	DojoName                   string    `json:"dojo_name"`
 	DojoLogoURL                string    `json:"dojo_logo_url"`
 	TotalAthletes              int       `json:"total_athletes"`
+	ApprovedAthletes           int       `json:"approved_athletes"`
 	SuratKesehatanUploaded     int       `json:"surat_kesehatan_uploaded"`
 	AktaKelahiranUploaded      int       `json:"akta_kelahiran_uploaded"`
 	RecommendationLetterStatus string    `json:"recommendation_letter_status"`

@@ -373,6 +373,7 @@ func (p *ParticipantDB) ListEventRegistrationDojos(
 			d.name,
 			d.logo_url,
 			COUNT(DISTINCT p.id) AS total_athletes,
+			COUNT(DISTINCT CASE WHEN p.status = $5 THEN p.id END) AS approved_athletes,
 			COUNT(DISTINCT CASE WHEN pd.document_type = $2 THEN pd.participant_id END) AS surat_kesehatan_uploaded,
 			COUNT(DISTINCT CASE WHEN pd.document_type = $3 THEN pd.participant_id END) AS akta_kelahiran_uploaded,
 			COALESCE(drl.status, $4) AS recommendation_letter_status,
@@ -394,6 +395,7 @@ func (p *ParticipantDB) ListEventRegistrationDojos(
 		models.DocumentTypeSuratKesehatan,
 		models.DocumentTypeAktaKelahiran,
 		models.DocumentStatusNotUploaded,
+		models.ParticipantStatusApproved,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list event registration dojos: %w", err)
@@ -408,6 +410,7 @@ func (p *ParticipantDB) ListEventRegistrationDojos(
 			&item.DojoName,
 			&item.DojoLogoURL,
 			&item.TotalAthletes,
+			&item.ApprovedAthletes,
 			&item.SuratKesehatanUploaded,
 			&item.AktaKelahiranUploaded,
 			&item.RecommendationLetterStatus,

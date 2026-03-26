@@ -54,7 +54,7 @@ const getDojoInitials = (name) => {
   return parts.map((part) => part[0]?.toUpperCase() || "").join("");
 };
 
-const getRegistrationStatusMeta = (status) => {
+const getRecommendationStatusMeta = (status) => {
   if (status === "approved") {
     return {
       label: "Disetujui",
@@ -70,8 +70,42 @@ const getRegistrationStatusMeta = (status) => {
   }
 
   return {
-    label: "Belum Lengkap",
+    label: "Belum Diupload",
     className: "bg-app-surface-muted text-app-text-secondary",
+  };
+};
+
+const getRegistrationStatusMeta = (dojo) => {
+  const totalAthletes = Number(dojo?.totalAthletes || 0);
+  const approvedAthletes = Number(dojo?.approvedAthletes || 0);
+  const suratKesehatanUploaded = Number(dojo?.suratKesehatanUploaded || 0);
+  const aktaKelahiranUploaded = Number(dojo?.aktaKelahiranUploaded || 0);
+  const recommendationLetterStatus = dojo?.recommendationLetterStatus;
+
+  const isCompleted =
+    totalAthletes > 0 &&
+    approvedAthletes >= totalAthletes &&
+    suratKesehatanUploaded >= totalAthletes &&
+    aktaKelahiranUploaded >= totalAthletes &&
+    recommendationLetterStatus === "approved";
+
+  if (isCompleted) {
+    return {
+      label: "Disetujui",
+      className: "bg-green-100 text-green-700",
+    };
+  }
+
+  if (totalAthletes <= 0) {
+    return {
+      label: "Belum Mendaftar",
+      className: "bg-app-surface-muted text-app-text-secondary",
+    };
+  }
+
+  return {
+    label: "Dalam Proses",
+    className: "bg-amber-100 text-amber-700",
   };
 };
 
@@ -367,6 +401,7 @@ export function EventDetailPage({ navigation, event }) {
                     <th className="px-4 py-3 font-semibold">Total Atlet</th>
                     <th className="px-4 py-3 font-semibold">Surat Kesehatan</th>
                     <th className="px-4 py-3 font-semibold">Akta Kelahiran</th>
+                    <th className="px-4 py-3 font-semibold whitespace-nowrap">Status Surat Rekomendasi</th>
                     <th className="px-4 py-3 font-semibold whitespace-nowrap">Status Pendaftaran</th>
                     <th className="px-4 py-3 font-semibold">Terakhir Diperbarui</th>
                     <th className="px-4 py-3 font-semibold whitespace-nowrap">Detail</th>
@@ -374,7 +409,8 @@ export function EventDetailPage({ navigation, event }) {
                 </thead>
                 <tbody>
                   {registrationDojos.map((dojo) => {
-                    const statusMeta = getRegistrationStatusMeta(dojo.recommendationLetterStatus);
+                    const recommendationStatusMeta = getRecommendationStatusMeta(dojo.recommendationLetterStatus);
+                    const statusMeta = getRegistrationStatusMeta(dojo);
 
                     return (
                       <tr key={dojo.dojoId} className="border-t border-app-border align-top">
@@ -400,6 +436,11 @@ export function EventDetailPage({ navigation, event }) {
                         <td className="px-4 py-3 text-app-text-secondary">{dojo.totalAthletes}</td>
                         <td className="px-4 py-3 text-app-text-secondary">{`${dojo.suratKesehatanUploaded}/${dojo.totalAthletes}`}</td>
                         <td className="px-4 py-3 text-app-text-secondary">{`${dojo.aktaKelahiranUploaded}/${dojo.totalAthletes}`}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${recommendationStatusMeta.className}`}>
+                            {recommendationStatusMeta.label}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${statusMeta.className}`}>
                             {statusMeta.label}
