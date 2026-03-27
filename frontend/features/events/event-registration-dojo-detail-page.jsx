@@ -10,14 +10,29 @@ import {
   deleteEventDojoParticipant,
   getEventDojoRegistrationDetail,
   updateEventDojoParticipantStatus,
+  updateEventDojoRegistrationPaymentStatus,
   updateEventDojoRecommendationLetterStatus,
 } from "@/features/events/service";
 import { formatDateTime, formatText } from "@/shared/utils/formatters";
 
 const DETAIL_TABS = [
   { key: "athletes", label: "Atlet & Berkas" },
+  { key: "payment", label: "Bukti Pendaftaran" },
   { key: "recommendation", label: "Surat Rekomendasi" },
 ];
+
+const formatCurrency = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    return "Rp0";
+  }
+
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
 
 const getParticipantDocument = (participant, documentType) => {
   const docs = Array.isArray(participant?.documents) ? participant.documents : [];
@@ -58,19 +73,33 @@ const getRecommendationStatusMeta = (status) => {
   return { label: "Belum Diupload", className: "bg-app-surface-muted text-app-text-secondary" };
 };
 
+const getRegistrationPaymentStatusMeta = (status) => {
+  if (status === "approved") {
+    return { label: "Disetujui", className: "bg-green-100 text-green-700" };
+  }
+
+  if (status === "pending") {
+    return { label: "Menunggu Persetujuan", className: "bg-amber-100 text-amber-700" };
+  }
+
+  return { label: "Belum Diupload", className: "bg-app-surface-muted text-app-text-secondary" };
+};
+
 const getRegistrationStatusMeta = (summary) => {
   const totalParticipants = Number(summary?.totalParticipants || 0);
   const approvedParticipants = Number(summary?.approvedParticipants || 0);
   const suratKesehatanUploaded = Number(summary?.suratKesehatanUploaded || 0);
   const aktaKelahiranUploaded = Number(summary?.aktaKelahiranUploaded || 0);
   const recommendationLetterStatus = summary?.recommendationLetterStatus || "not_uploaded";
+  const registrationPaymentStatus = summary?.registrationPaymentStatus || "not_uploaded";
 
   const isCompleted =
     totalParticipants > 0 &&
     approvedParticipants >= totalParticipants &&
     suratKesehatanUploaded >= totalParticipants &&
     aktaKelahiranUploaded >= totalParticipants &&
-    recommendationLetterStatus === "approved";
+    recommendationLetterStatus === "approved" &&
+    registrationPaymentStatus === "approved";
 
   if (isCompleted) {
     return { label: "Disetujui", className: "bg-green-100 text-green-700" };
@@ -145,6 +174,7 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
   const [approvalLoadingMap, setApprovalLoadingMap] = useState({});
   const [deleteLoadingMap, setDeleteLoadingMap] = useState({});
   const [letterApprovalLoading, setLetterApprovalLoading] = useState(false);
+  const [paymentApprovalLoading, setPaymentApprovalLoading] = useState(false);
   const [documentPreview, setDocumentPreview] = useState(null);
 
   const loadDetail = useCallback(async () => {
@@ -221,6 +251,20 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
       setActionError(updateError?.message || "Gagal memperbarui status surat rekomendasi");
     } finally {
       setLetterApprovalLoading(false);
+    }
+  };
+
+  const handleUpdateRegistrationPaymentStatus = async (nextStatus) => {
+    setActionError("");
+    setPaymentApprovalLoading(true);
+
+    try {
+      await updateEventDojoRegistrationPaymentStatus(event.id, dojoId, nextStatus);
+      await loadDetail();
+    } catch (updateError) {
+      setActionError(updateError?.message || "Gagal memperbarui status bukti pendaftaran");
+    } finally {
+      setPaymentApprovalLoading(false);
     }
   };
 
@@ -311,6 +355,7 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
   };
 
   const recommendationStatusMeta = getRecommendationStatusMeta(detail?.statusSummary?.recommendationLetterStatus);
+  const registrationPaymentStatusMeta = getRegistrationPaymentStatusMeta(detail?.statusSummary?.registrationPaymentStatus);
   const registrationStatusMeta = getRegistrationStatusMeta(detail?.statusSummary);
 
   return (
@@ -365,10 +410,20 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
             </span>
           </div>
           <div className="rounded-xl border border-app-border bg-app-surface-muted px-4 py-3">
+            <p className="text-xs uppercase tracking-wide text-app-text-secondary">Total Nominal</p>
+            <p className="mt-1 text-lg font-semibold text-app-text-primary">{formatCurrency(detail?.statusSummary?.totalNominal || 0)}</p>
+          </div>
+          <div className="rounded-xl border border-app-border bg-app-surface-muted px-4 py-3">
             <p className="text-xs uppercase tracking-wide text-app-text-secondary">Atlet Disetujui</p>
             <p className="mt-1 text-lg font-semibold text-app-text-primary">
               {detail?.statusSummary?.approvedParticipants || 0}/{detail?.statusSummary?.totalParticipants || 0}
             </p>
+          </div>
+          <div className="rounded-xl border border-app-border bg-app-surface-muted px-4 py-3">
+            <p className="text-xs uppercase tracking-wide text-app-text-secondary">Status Bukti Pendaftaran</p>
+            <span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${registrationPaymentStatusMeta.className}`}>
+              {registrationPaymentStatusMeta.label}
+            </span>
           </div>
           <div className="rounded-xl border border-app-border bg-app-surface-muted px-4 py-3">
             <p className="text-xs uppercase tracking-wide text-app-text-secondary">Status Surat Rekomendasi</p>
@@ -553,6 +608,86 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId }) {
             </div>
           ) : (
             <p className="mt-4 text-sm text-app-text-secondary">Belum ada atlet pada dojo ini.</p>
+          )}
+        </section>
+      ) : null}
+
+      {!isLoading && !error && detail && activeTab === "payment" ? (
+        <section className="rounded-3xl border border-app-border bg-app-surface p-6 shadow-sm">
+          <h2 className="font-display text-xl font-semibold text-app-text-primary">Bukti Pendaftaran</h2>
+
+          {actionError ? (
+            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
+              <p className="text-sm font-medium text-red-700">{actionError}</p>
+            </div>
+          ) : null}
+
+          {detail.registrationPayment?.fileUrl ? (
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${registrationPaymentStatusMeta.className}`}>
+                  {registrationPaymentStatusMeta.label}
+                </span>
+                <span className="rounded-full bg-app-surface-muted px-3 py-1 text-xs font-semibold text-app-text-primary">
+                  Total: {formatCurrency(detail?.statusSummary?.totalNominal || 0)}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={paymentApprovalLoading || detail.registrationPayment.status === "approved"}
+                    onClick={() => handleUpdateRegistrationPaymentStatus("approved")}
+                    title="Setujui Bukti Pendaftaran"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-green-300 bg-green-50 text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {paymentApprovalLoading && detail.registrationPayment.status !== "approved" ? (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-green-600 border-t-transparent" />
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                        <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={paymentApprovalLoading || detail.registrationPayment.status === "pending"}
+                    onClick={() => handleUpdateRegistrationPaymentStatus("pending")}
+                    title="Batalkan Persetujuan"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-300 bg-red-50 text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {paymentApprovalLoading && detail.registrationPayment.status === "approved" ? (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-red-600 border-t-transparent" />
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                        <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <span className="text-xs text-app-text-secondary">
+                  Diunggah: {formatDateTime(detail.registrationPayment.uploadedAt)}
+                </span>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-app-border bg-app-surface-muted">
+                {isPdfPath(detail.registrationPayment.filePath) ? (
+                  <iframe
+                    title={`preview-pembayaran-${dojoId}`}
+                    src={detail.registrationPayment.fileUrl}
+                    className="h-[82vh] w-full bg-white"
+                  />
+                ) : (
+                  <div className="flex h-[82vh] items-center justify-center p-4">
+                    <img
+                      src={detail.registrationPayment.fileUrl}
+                      alt="Bukti pendaftaran"
+                      className="max-h-full w-auto rounded-lg border border-app-border bg-white object-contain"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-app-text-secondary">Belum ada bukti pendaftaran yang diupload.</p>
           )}
         </section>
       ) : null}

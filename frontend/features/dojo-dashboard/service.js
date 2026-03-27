@@ -352,6 +352,27 @@ export const uploadRecommendationLetter = async (eventId, dojoId, file) => {
   return envelope?.data || {};
 };
 
+export const uploadRegistrationPayment = async (eventId, dojoId, file) => {
+  if (!eventId || !dojoId || !file) {
+    throw new Error("Event ID, Dojo ID, and file are required");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(
+    `/api/events/${eventId}/dojos/${dojoId}/registration-payment`,
+    {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    }
+  );
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to upload registration payment");
+  return envelope?.data || {};
+};
+
 export const getRecommendationLetter = async (eventId, dojoId) => {
   if (!eventId || !dojoId) {
     throw new Error("Event ID and Dojo ID are required");
@@ -369,6 +390,26 @@ export const getRecommendationLetter = async (eventId, dojoId) => {
   );
 
   const envelope = await parseEnvelopeResponse(response, "Failed to fetch recommendation letter");
+  return envelope?.data || null;
+};
+
+export const getRegistrationPayment = async (eventId, dojoId) => {
+  if (!eventId || !dojoId) {
+    throw new Error("Event ID and Dojo ID are required");
+  }
+
+  const response = await fetch(
+    `/api/events/${eventId}/dojos/${dojoId}/registration-payment`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    }
+  );
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to fetch registration payment");
   return envelope?.data || null;
 };
 

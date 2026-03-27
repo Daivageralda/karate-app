@@ -179,6 +179,31 @@ func (s *ParticipantService) CreateRecommendationLetter(
 	return letter, nil
 }
 
+// CreateRegistrationPayment creates a dojo registration payment proof.
+func (s *ParticipantService) CreateRegistrationPayment(
+	ctx context.Context,
+	input models.UploadRegistrationPaymentInput,
+) (*models.DojoRegistrationPayment, error) {
+	if input.DojoID == uuid.Nil {
+		return nil, fmt.Errorf("dojo_id is required")
+	}
+
+	if input.EventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	if strings.TrimSpace(input.FilePath) == "" {
+		return nil, fmt.Errorf("file_path is required")
+	}
+
+	payment, err := s.participantDB.CreateRegistrationPayment(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	return payment, nil
+}
+
 // GetRecommendationLetter returns recommendation letter for a dojo and event.
 func (s *ParticipantService) GetRecommendationLetter(
 	ctx context.Context,
@@ -198,6 +223,27 @@ func (s *ParticipantService) GetRecommendationLetter(
 	}
 
 	return letter, nil
+}
+
+// GetRegistrationPayment returns dojo registration payment proof for one event.
+func (s *ParticipantService) GetRegistrationPayment(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+) (*models.DojoRegistrationPayment, error) {
+	if eventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	if dojoID == uuid.Nil {
+		return nil, fmt.Errorf("dojo_id is required")
+	}
+
+	payment, err := s.participantDB.GetRegistrationPayment(ctx, dojoID, eventID)
+	if err != nil {
+		return nil, err
+	}
+
+	return payment, nil
 }
 
 // GetStatusSummary returns the status summary for an event
@@ -718,6 +764,37 @@ func (s *ParticipantService) UpdateRecommendationLetterStatus(
 	return letter, nil
 }
 
+// UpdateRegistrationPaymentStatus updates the status of a registration payment proof.
+func (s *ParticipantService) UpdateRegistrationPaymentStatus(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+	status string,
+) (*models.DojoRegistrationPayment, error) {
+	if eventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	if dojoID == uuid.Nil {
+		return nil, fmt.Errorf("dojo_id is required")
+	}
+
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != models.DocumentStatusPending && status != models.DocumentStatusApproved {
+		return nil, fmt.Errorf("status must be pending or approved")
+	}
+
+	payment, err := s.participantDB.UpdateRegistrationPaymentStatus(ctx, eventID, dojoID, status)
+	if err != nil {
+		return nil, err
+	}
+
+	if payment == nil {
+		return nil, fmt.Errorf("registration payment not found")
+	}
+
+	return payment, nil
+}
+
 // UpdateParticipantStatusByDojo updates one participant status in a dojo registration.
 func (s *ParticipantService) UpdateParticipantStatusByDojo(
 	ctx context.Context,
@@ -772,11 +849,13 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 	defer f.Close()
 
 	const pesertaSheet = "Peserta"
+	const summarySheet = "Ringkasan Biaya"
 	const referensiSheet = "Referensi"
 
 	if err := f.SetSheetName("Sheet1", pesertaSheet); err != nil {
 		return nil, fmt.Errorf("set peserta sheet name: %w", err)
 	}
+	f.NewSheet(summarySheet)
 	f.NewSheet(referensiSheet)
 
 	headers := []string{
@@ -799,6 +878,9 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 		if err := f.SetCellValue(pesertaSheet, cell, header); err != nil {
 			return nil, fmt.Errorf("set peserta header: %w", err)
 		}
+	}
+	if err := f.SetCellValue(pesertaSheet, "M1", "Total Biaya (Rp)"); err != nil {
+		return nil, fmt.Errorf("set peserta total biaya header: %w", err)
 	}
 
 	dependentOptions := buildDependentKelasTandingOptions(assignedKelasTanding)
@@ -847,6 +929,7 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 		rangeNames = append(rangeNames, rangeName)
 	}
 	sort.Strings(rangeNames)
+	priceLookup := buildKelasTandingPriceLookup(assignedKelasTanding)
 
 	startColIdx := 7
 	for i, rangeName := range rangeNames {
@@ -879,6 +962,31 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 		}
 	}
 
+	priceNameColIdx := startColIdx + len(rangeNames)
+	priceValueColIdx := priceNameColIdx + 1
+	priceNameColName, _ := excelize.ColumnNumberToName(priceNameColIdx)
+	priceValueColName, _ := excelize.ColumnNumberToName(priceValueColIdx)
+	priceNameHeaderCell, _ := excelize.CoordinatesToCellName(priceNameColIdx, 1)
+	priceValueHeaderCell, _ := excelize.CoordinatesToCellName(priceValueColIdx, 1)
+	if err := f.SetCellValue(referensiSheet, priceNameHeaderCell, "Nama Kelas Tanding"); err != nil {
+		return nil, fmt.Errorf("set referensi harga header nama: %w", err)
+	}
+	if err := f.SetCellValue(referensiSheet, priceValueHeaderCell, "Harga"); err != nil {
+		return nil, fmt.Errorf("set referensi harga header value: %w", err)
+	}
+	priceLookupLastRow := 2
+	for idx, item := range priceLookup {
+		nameCell, _ := excelize.CoordinatesToCellName(priceNameColIdx, idx+2)
+		valueCell, _ := excelize.CoordinatesToCellName(priceValueColIdx, idx+2)
+		if err := f.SetCellValue(referensiSheet, nameCell, item.Nama); err != nil {
+			return nil, fmt.Errorf("set referensi harga nama: %w", err)
+		}
+		if err := f.SetCellValue(referensiSheet, valueCell, item.Harga); err != nil {
+			return nil, fmt.Errorf("set referensi harga value: %w", err)
+		}
+		priceLookupLastRow = idx + 2
+	}
+
 	dvJenisKelamin := excelize.NewDataValidation(true)
 	dvJenisKelamin.Sqref = "D2:D500"
 	dvJenisKelamin.SetSqrefDropList(fmt.Sprintf("%s!$A$2:$A$3", referensiSheet))
@@ -897,7 +1005,7 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 
 	dvKelasTanding := excelize.NewDataValidation(true)
 	dvKelasTanding.Sqref = "H2:L500"
-	if err := dvKelasTanding.SetDropList([]string{"=INDIRECT($M2)"}); err != nil {
+	if err := dvKelasTanding.SetDropList([]string{"=INDIRECT($N2)"}); err != nil {
 		return nil, fmt.Errorf("set validation kelas tanding formula: %w", err)
 	}
 	dvKelasTanding.SetInput("Kelas Tanding", "Pilih bisa lebih dari satu lewat kolom Kelas Tanding 1-5. Opsi dropdown mengikuti kombinasi per baris dan berat badan.")
@@ -947,16 +1055,38 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 			return nil, fmt.Errorf("set kategori umur formula: %w", err)
 		}
 
+		totalHargaCell, _ := excelize.CoordinatesToCellName(13, row)
+		totalHargaFormula := buildTotalHargaFormula(row, referensiSheet, priceNameColName, priceValueColName, priceLookupLastRow)
+		if err := f.SetCellFormula(pesertaSheet, totalHargaCell, totalHargaFormula); err != nil {
+			return nil, fmt.Errorf("set total harga formula: %w", err)
+		}
+
 		// Helper formula that selects weight-filtered range for kumite, or standard range for kata
 		helperFormula := buildHelperFormulaWithWeightFiltering(row, referensiSheet, weightRangesByKombinasi)
-		helperCell, _ := excelize.CoordinatesToCellName(13, row)
+		helperCell, _ := excelize.CoordinatesToCellName(14, row)
 		if err := f.SetCellFormula(pesertaSheet, helperCell, helperFormula); err != nil {
 			return nil, fmt.Errorf("set kelas key helper formula: %w", err)
 		}
 	}
 
-	if err := f.SetCellValue(pesertaSheet, "M1", "__kelas_key"); err != nil {
+	if err := f.SetCellValue(pesertaSheet, "N1", "__kelas_key"); err != nil {
 		return nil, fmt.Errorf("set helper header: %w", err)
+	}
+
+	if err := f.SetCellValue(summarySheet, "A1", "Ringkasan Biaya Pendaftaran"); err != nil {
+		return nil, fmt.Errorf("set summary title: %w", err)
+	}
+	if err := f.SetCellValue(summarySheet, "A3", "Total Seluruh Atlet"); err != nil {
+		return nil, fmt.Errorf("set summary total label: %w", err)
+	}
+	if err := f.SetCellFormula(summarySheet, "B3", "=SUM(Peserta!M2:M500)"); err != nil {
+		return nil, fmt.Errorf("set summary total formula: %w", err)
+	}
+	if err := f.SetCellValue(summarySheet, "A4", "Jumlah Atlet Terisi"); err != nil {
+		return nil, fmt.Errorf("set summary count label: %w", err)
+	}
+	if err := f.SetCellFormula(summarySheet, "B4", "=COUNTA(Peserta!A2:A500)"); err != nil {
+		return nil, fmt.Errorf("set summary count formula: %w", err)
 	}
 
 	example := []any{
@@ -989,8 +1119,11 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 		return nil, fmt.Errorf("create header style: %w", err)
 	}
 
-	if err := f.SetCellStyle(pesertaSheet, "A1", "L1", headerStyleID); err != nil {
+	if err := f.SetCellStyle(pesertaSheet, "A1", "M1", headerStyleID); err != nil {
 		return nil, fmt.Errorf("apply header style: %w", err)
+	}
+	if err := f.SetCellStyle(summarySheet, "A1", "B1", headerStyleID); err != nil {
+		return nil, fmt.Errorf("apply summary header style: %w", err)
 	}
 
 	_ = f.SetColWidth(pesertaSheet, "A", "A", 28)
@@ -999,7 +1132,10 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 	_ = f.SetColWidth(pesertaSheet, "D", "F", 22)
 	_ = f.SetColWidth(pesertaSheet, "G", "G", 28)
 	_ = f.SetColWidth(pesertaSheet, "H", "L", 30)
-	_ = f.SetColVisible(pesertaSheet, "M", false)
+	_ = f.SetColWidth(pesertaSheet, "M", "M", 18)
+	_ = f.SetColVisible(pesertaSheet, "N", false)
+	_ = f.SetColWidth(summarySheet, "A", "A", 24)
+	_ = f.SetColWidth(summarySheet, "B", "B", 18)
 
 	if err := f.SetPanes(pesertaSheet, &excelize.Panes{
 		Freeze:      true,
@@ -1022,6 +1158,54 @@ func (s *ParticipantService) GenerateExcelTemplate(ctx context.Context, eventID 
 	}
 
 	return buf.Bytes(), nil
+}
+
+type kelasTandingPriceLookupItem struct {
+	Nama  string
+	Harga int64
+}
+
+func buildKelasTandingPriceLookup(items []models.EventKelasTandingItem) []kelasTandingPriceLookupItem {
+	lookupByName := make(map[string]kelasTandingPriceLookupItem, len(items))
+	for _, item := range items {
+		if !item.IsAssigned {
+			continue
+		}
+
+		nama := strings.TrimSpace(item.Nama)
+		if nama == "" {
+			continue
+		}
+
+		lookupByName[strings.ToLower(nama)] = kelasTandingPriceLookupItem{
+			Nama:  nama,
+			Harga: item.Harga,
+		}
+	}
+
+	keys := make([]string, 0, len(lookupByName))
+	for key := range lookupByName {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := make([]kelasTandingPriceLookupItem, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, lookupByName[key])
+	}
+
+	return result
+}
+
+func buildTotalHargaFormula(row int, referenceSheet, priceNameColName, priceValueColName string, lastRow int) string {
+	if lastRow < 2 {
+		return fmt.Sprintf(`=IF(COUNTA(A%d:L%d)=0,"",0)`, row, row)
+	}
+
+	priceNameRange := fmt.Sprintf(`%s!$%s$2:$%s$%d`, referenceSheet, priceNameColName, priceNameColName, lastRow)
+	priceValueRange := fmt.Sprintf(`%s!$%s$2:$%s$%d`, referenceSheet, priceValueColName, priceValueColName, lastRow)
+
+	return fmt.Sprintf(`=IF(COUNTA(A%d:L%d)=0,"",SUM(SUMIF(%s,H%d,%s),SUMIF(%s,I%d,%s),SUMIF(%s,J%d,%s),SUMIF(%s,K%d,%s),SUMIF(%s,L%d,%s)))`, row, row, priceNameRange, row, priceValueRange, priceNameRange, row, priceValueRange, priceNameRange, row, priceValueRange, priceNameRange, row, priceValueRange, priceNameRange, row, priceValueRange)
 }
 
 // SaveUploadedParticipantsExcel stores the raw uploaded participants Excel file on disk.

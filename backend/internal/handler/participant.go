@@ -343,6 +343,61 @@ func (h *ParticipantHandler) UploadRecommendationLetter(c *gin.Context) {
 	response.Success(c, http.StatusCreated, "recommendation letter uploaded", letter)
 }
 
+// UploadRegistrationPayment handles POST /api/v1/events/:id/dojos/:dojoId/registration-payment
+// Uploads registration payment proof from a dojo for an event.
+func (h *ParticipantHandler) UploadRegistrationPayment(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "file is required")
+		return
+	}
+
+	if err := validateDocumentMIME(file); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	safeFilename := filepath.Base(file.Filename)
+	relativePath := filepath.Join("uploads", "registration_payments", eventID.String(), dojoID.String(), safeFilename)
+	if err := os.MkdirAll(filepath.Dir(relativePath), 0o755); err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to prepare upload directory")
+		return
+	}
+
+	if err := c.SaveUploadedFile(file, relativePath); err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to save file")
+		return
+	}
+
+	storedPath := "/" + strings.ReplaceAll(relativePath, string(filepath.Separator), "/")
+
+	input := models.UploadRegistrationPaymentInput{
+		DojoID:   dojoID,
+		EventID:  eventID,
+		FilePath: storedPath,
+	}
+
+	payment, err := h.participantService.CreateRegistrationPayment(c.Request.Context(), input)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "registration payment uploaded", payment)
+}
+
 // GetRecommendationLetter handles GET /api/v1/events/:id/dojos/:dojoId/recommendation-letter
 // Returns persisted recommendation letter for a dojo and event.
 func (h *ParticipantHandler) GetRecommendationLetter(c *gin.Context) {
@@ -370,6 +425,35 @@ func (h *ParticipantHandler) GetRecommendationLetter(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, "recommendation letter retrieved", letter)
+}
+
+// GetRegistrationPayment handles GET /api/v1/events/:id/dojos/:dojoId/registration-payment
+// Returns persisted registration payment proof for a dojo and event.
+func (h *ParticipantHandler) GetRegistrationPayment(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	payment, err := h.participantService.GetRegistrationPayment(c.Request.Context(), eventID, dojoID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "failed to fetch registration payment")
+		return
+	}
+
+	if payment == nil {
+		response.Success(c, http.StatusOK, "registration payment not found", nil)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "registration payment retrieved", payment)
 }
 
 // DeleteParticipant handles DELETE /api/v1/events/:id/dojos/:dojoId/participants/:participantId
@@ -497,6 +581,46 @@ func (h *ParticipantHandler) UpdateRecommendationLetterStatus(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, "recommendation letter status updated", letter)
+}
+
+// UpdateRegistrationPaymentStatus handles PUT /api/v1/events/:id/dojos/:dojoId/registration-payment/status
+// Updates the approval status of a registration payment proof.
+func (h *ParticipantHandler) UpdateRegistrationPaymentStatus(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	var req updateParticipantStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	payment, err := h.participantService.UpdateRegistrationPaymentStatus(
+		c.Request.Context(),
+		eventID,
+		dojoID,
+		req.Status,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			response.Error(c, http.StatusNotFound, err.Error())
+			return
+		}
+
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, "registration payment status updated", payment)
 }
 
 // DeleteDojoRegistration handles DELETE /api/v1/events/:id/dojos/:dojoId/registration

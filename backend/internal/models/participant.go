@@ -45,6 +45,16 @@ type DojoRecommendationLetter struct {
 	Status     string    `json:"status"`
 }
 
+// DojoRegistrationPayment represents a payment proof uploaded by a dojo for an event.
+type DojoRegistrationPayment struct {
+	ID         uuid.UUID `json:"uuid"`
+	DojoID     uuid.UUID `json:"dojo_id"`
+	EventID    uuid.UUID `json:"event_id"`
+	FilePath   string    `json:"file_path"`
+	UploadedAt time.Time `json:"uploaded_at"`
+	Status     string    `json:"status"`
+}
+
 // ParticipantStatus constants
 const (
 	ParticipantStatusPending  = "pending"
@@ -69,6 +79,7 @@ type DeleteDojoRegistrationResult struct {
 	DeletedParticipants         int  `json:"deleted_participants"`
 	DeletedDocuments            int  `json:"deleted_documents"`
 	DeletedRecommendationLetter bool `json:"deleted_recommendation_letter"`
+	DeletedRegistrationPayment  bool `json:"deleted_registration_payment"`
 }
 
 // DummyKategoriTanding returns dummy kategori tanding options as JSON
@@ -124,6 +135,13 @@ type UploadRecommendationLetterInput struct {
 	FilePath string
 }
 
+// UploadRegistrationPaymentInput represents input for uploading registration payment proof.
+type UploadRegistrationPaymentInput struct {
+	DojoID   uuid.UUID
+	EventID  uuid.UUID
+	FilePath string
+}
+
 // ParticipantStatusSummary represents the status summary for participants in an event
 type ParticipantStatusSummary struct {
 	TotalParticipants          int    `json:"total_participants"`
@@ -132,7 +150,9 @@ type ParticipantStatusSummary struct {
 	SuratKesehatanApproved     int    `json:"surat_kesehatan_approved"`
 	AktaKelahiran              int    `json:"akta_kelahiran_uploaded"`
 	AktaKelahiranApproved      int    `json:"akta_kelahiran_approved"`
+	TotalNominal               int64  `json:"total_nominal"`
 	RecommendationLetterStatus string `json:"recommendation_letter_status"` // pending, approved
+	RegistrationPaymentStatus  string `json:"registration_payment_status"`
 }
 
 // EventRegistrationDojo represents dojo-level registration summary within an event.

@@ -177,11 +177,29 @@ const normalizeStatusSummary = (rawValue = {}) => {
     approvedParticipants: normalizeNumber(rawValue.approved_participants),
     suratKesehatanUploaded: normalizeNumber(rawValue.surat_kesehatan_uploaded),
     aktaKelahiranUploaded: normalizeNumber(rawValue.akta_kelahiran_uploaded),
+    totalNominal: normalizeNumber(rawValue.total_nominal),
     recommendationLetterStatus: normalizeText(rawValue.recommendation_letter_status || "not_uploaded"),
+    registrationPaymentStatus: normalizeText(rawValue.registration_payment_status || "not_uploaded"),
   };
 };
 
 const normalizeRecommendationLetter = (rawValue) => {
+  if (!rawValue || typeof rawValue !== "object") {
+    return null;
+  }
+
+  return {
+    id: normalizeText(rawValue.uuid || rawValue.id),
+    dojoId: normalizeText(rawValue.dojo_id),
+    eventId: normalizeText(rawValue.event_id),
+    filePath: normalizeText(rawValue.file_path),
+    fileUrl: resolveAssetUrl(rawValue.file_path),
+    uploadedAt: normalizeText(rawValue.uploaded_at),
+    status: normalizeText(rawValue.status),
+  };
+};
+
+const normalizeRegistrationPayment = (rawValue) => {
   if (!rawValue || typeof rawValue !== "object") {
     return null;
   }
@@ -371,7 +389,7 @@ export const downloadEventRegistrationDojosExcel = async (id) => {
 };
 
 export const getEventDojoRegistrationDetail = async (eventId, dojoId) => {
-  const [statusResponse, participantsResponse, recommendationResponse] = await Promise.all([
+  const [statusResponse, participantsResponse, recommendationResponse, registrationPaymentResponse] = await Promise.all([
     fetch(`/api/events/${eventId}/dojos/${dojoId}/participants/status`, {
       method: "GET",
       headers: {
@@ -393,12 +411,20 @@ export const getEventDojoRegistrationDetail = async (eventId, dojoId) => {
       },
       cache: "no-store",
     }),
+    fetch(`/api/events/${eventId}/dojos/${dojoId}/registration-payment`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    }),
   ]);
 
-  const [statusEnvelope, participantsEnvelope, recommendationEnvelope] = await Promise.all([
+  const [statusEnvelope, participantsEnvelope, recommendationEnvelope, registrationPaymentEnvelope] = await Promise.all([
     parseEnvelopeResponse(statusResponse, "Failed to fetch status summary"),
     parseEnvelopeResponse(participantsResponse, "Failed to fetch participants"),
     parseEnvelopeResponse(recommendationResponse, "Failed to fetch recommendation letter"),
+    parseEnvelopeResponse(registrationPaymentResponse, "Failed to fetch registration payment"),
   ]);
 
   const rawParticipants = Array.isArray(participantsEnvelope?.data?.data)
@@ -411,6 +437,7 @@ export const getEventDojoRegistrationDetail = async (eventId, dojoId) => {
     statusSummary: normalizeStatusSummary(statusEnvelope?.data || {}),
     participants: rawParticipants.map((item) => normalizeEventDojoParticipant(item)),
     recommendationLetter: normalizeRecommendationLetter(recommendationEnvelope?.data),
+    registrationPayment: normalizeRegistrationPayment(registrationPaymentEnvelope?.data),
   };
 };
 
@@ -435,6 +462,29 @@ export const updateEventDojoRecommendationLetterStatus = async (eventId, dojoId,
 
   const envelope = await parseEnvelopeResponse(response, "Failed to update recommendation letter status");
   return normalizeRecommendationLetter(envelope?.data || {});
+};
+
+export const updateEventDojoRegistrationPaymentStatus = async (eventId, dojoId, status) => {
+  if (!eventId || !dojoId) {
+    throw new Error("Event ID dan Dojo ID wajib diisi");
+  }
+
+  const normalizedStatus = normalizeText(status).trim().toLowerCase();
+  if (!["pending", "approved"].includes(normalizedStatus)) {
+    throw new Error("Status bukti pendaftaran harus pending atau approved");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/dojos/${dojoId}/registration-payment/status`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: normalizedStatus }),
+    cache: "no-store",
+  });
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to update registration payment status");
+  return normalizeRegistrationPayment(envelope?.data || {});
 };
 
 export const updateEventDojoParticipantStatus = async (eventId, dojoId, participantId, status) => {

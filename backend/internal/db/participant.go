@@ -273,6 +273,36 @@ func (p *ParticipantDB) CreateRecommendationLetter(
 	return &letter, nil
 }
 
+// CreateRegistrationPayment creates a new registration payment proof.
+func (p *ParticipantDB) CreateRegistrationPayment(
+	ctx context.Context,
+	input models.UploadRegistrationPaymentInput,
+) (*models.DojoRegistrationPayment, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	id := uuid.New()
+	query := `
+		INSERT INTO dojo_registration_payments (id, dojo_id, event_id, file_path, status)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (dojo_id, event_id) DO UPDATE SET file_path = $4, uploaded_at = NOW(), status = $5
+		RETURNING id, dojo_id, event_id, file_path, uploaded_at, status
+	`
+
+	var payment models.DojoRegistrationPayment
+	err := p.db.QueryRow(queryCtx, query,
+		id, input.DojoID, input.EventID, input.FilePath, models.DocumentStatusPending,
+	).Scan(
+		&payment.ID, &payment.DojoID, &payment.EventID, &payment.FilePath, &payment.UploadedAt, &payment.Status,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("insert registration payment: %w", err)
+	}
+
+	return &payment, nil
+}
+
 // GetRecommendationLetter returns recommendation letter for a dojo and event
 func (p *ParticipantDB) GetRecommendationLetter(
 	ctx context.Context,
@@ -300,6 +330,35 @@ func (p *ParticipantDB) GetRecommendationLetter(
 	}
 
 	return &letter, nil
+}
+
+// GetRegistrationPayment returns registration payment proof for a dojo and event.
+func (p *ParticipantDB) GetRegistrationPayment(
+	ctx context.Context,
+	dojoID, eventID uuid.UUID,
+) (*models.DojoRegistrationPayment, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT id, dojo_id, event_id, file_path, uploaded_at, status
+		FROM dojo_registration_payments
+		WHERE dojo_id = $1 AND event_id = $2
+	`
+
+	var payment models.DojoRegistrationPayment
+	err := p.db.QueryRow(queryCtx, query, dojoID, eventID).Scan(
+		&payment.ID, &payment.DojoID, &payment.EventID, &payment.FilePath, &payment.UploadedAt, &payment.Status,
+	)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query registration payment: %w", err)
+	}
+
+	return &payment, nil
 }
 
 // GetStatusSummary returns the status summary for participants in an event
@@ -354,6 +413,49 @@ func (p *ParticipantDB) GetStatusSummary(
 		summary.RecommendationLetterStatus = *letterStatus
 	} else {
 		summary.RecommendationLetterStatus = models.DocumentStatusNotUploaded
+	}
+
+	paymentQuery := `
+		SELECT status FROM dojo_registration_payments
+		WHERE event_id = $1 AND dojo_id = $2
+	`
+	var paymentStatus *string
+	err = p.db.QueryRow(queryCtx, paymentQuery, eventID, dojoID).Scan(&paymentStatus)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, fmt.Errorf("query registration payment status: %w", err)
+	}
+
+	if paymentStatus != nil {
+		summary.RegistrationPaymentStatus = *paymentStatus
+	} else {
+		summary.RegistrationPaymentStatus = models.DocumentStatusNotUploaded
+	}
+
+	totalNominalQuery := `
+		SELECT COALESCE(SUM(participant_total.total_harga), 0)
+		FROM participants p
+		LEFT JOIN LATERAL (
+			SELECT COALESCE(SUM(prices.harga), 0) AS total_harga
+			FROM (
+				SELECT DISTINCT LOWER(TRIM(selected_value.value)) AS kelas_name
+				FROM jsonb_array_elements_text(p.kelas_tanding) AS selected_value(value)
+				WHERE TRIM(selected_value.value) <> ''
+			) selected
+			JOIN (
+				SELECT DISTINCT ON (LOWER(TRIM(kt.nama)))
+					LOWER(TRIM(kt.nama)) AS kelas_name,
+					ekt.harga
+				FROM event_kelas_tanding ekt
+				JOIN kelas_tanding kt ON kt.id = ekt.kelas_tanding_id
+				WHERE ekt.event_id = p.event_id
+				ORDER BY LOWER(TRIM(kt.nama)), ekt.updated_at DESC, ekt.created_at DESC
+			) prices ON prices.kelas_name = selected.kelas_name
+		) participant_total ON TRUE
+		WHERE p.event_id = $1 AND p.dojo_id = $2
+	`
+	err = p.db.QueryRow(queryCtx, totalNominalQuery, eventID, dojoID).Scan(&summary.TotalNominal)
+	if err != nil {
+		return nil, fmt.Errorf("query total nominal: %w", err)
 	}
 
 	return summary, nil
@@ -490,6 +592,16 @@ func (p *ParticipantDB) DeleteDojoRegistration(
 		return nil, fmt.Errorf("delete recommendation letter: %w", err)
 	}
 
+	deleteRegistrationPaymentQuery := `
+		DELETE FROM dojo_registration_payments
+		WHERE event_id = $1 AND dojo_id = $2
+	`
+
+	deletedRegistrationPaymentTag, err := tx.Exec(queryCtx, deleteRegistrationPaymentQuery, eventID, dojoID)
+	if err != nil {
+		return nil, fmt.Errorf("delete registration payment: %w", err)
+	}
+
 	if err := tx.Commit(queryCtx); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
@@ -498,6 +610,7 @@ func (p *ParticipantDB) DeleteDojoRegistration(
 		DeletedParticipants:         int(deletedParticipantsTag.RowsAffected()),
 		DeletedDocuments:            deletedDocuments,
 		DeletedRecommendationLetter: deletedRecommendationTag.RowsAffected() > 0,
+		DeletedRegistrationPayment:  deletedRegistrationPaymentTag.RowsAffected() > 0,
 	}
 
 	return result, nil
@@ -583,6 +696,36 @@ func (p *ParticipantDB) UpdateRecommendationLetterStatus(
 	}
 
 	return &letter, nil
+}
+
+// UpdateRegistrationPaymentStatus updates the status of a registration payment proof for a dojo in an event.
+func (p *ParticipantDB) UpdateRegistrationPaymentStatus(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+	status string,
+) (*models.DojoRegistrationPayment, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	query := `
+		UPDATE dojo_registration_payments
+		SET status = $3
+		WHERE event_id = $1 AND dojo_id = $2
+		RETURNING id, dojo_id, event_id, file_path, uploaded_at, status
+	`
+
+	var payment models.DojoRegistrationPayment
+	err := p.db.QueryRow(queryCtx, query, eventID, dojoID, status).Scan(
+		&payment.ID, &payment.DojoID, &payment.EventID, &payment.FilePath, &payment.UploadedAt, &payment.Status,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("update registration payment status: %w", err)
+	}
+
+	return &payment, nil
 }
 
 // UpdateParticipantStatusByDojo updates one participant status within an event+dojo scope.
