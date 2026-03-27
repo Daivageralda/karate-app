@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"eo-karate/internal/models"
@@ -37,18 +36,18 @@ func (e *EventKelasTandingDB) EventExists(ctx context.Context, eventID uuid.UUID
 	return exists, nil
 }
 
-// CountKelasTandingIDs returns the number of existing kelas tanding IDs from the provided list.
-func (e *EventKelasTandingDB) CountKelasTandingIDs(ctx context.Context, ids []uuid.UUID) (int, error) {
+// KelasTandingExists checks whether one kelas tanding exists.
+func (e *EventKelasTandingDB) KelasTandingExists(ctx context.Context, kelasTandingID uuid.UUID) (bool, error) {
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	var count int
-	err := e.db.QueryRow(queryCtx, `SELECT COUNT(*) FROM kelas_tanding WHERE id = ANY($1::uuid[])`, ids).Scan(&count)
+	var exists bool
+	err := e.db.QueryRow(queryCtx, `SELECT EXISTS(SELECT 1 FROM kelas_tanding WHERE id = $1)`, kelasTandingID).Scan(&exists)
 	if err != nil {
-		return 0, fmt.Errorf("count kelas_tanding ids: %w", err)
+		return false, fmt.Errorf("check kelas_tanding existence: %w", err)
 	}
 
-	return count, nil
+	return exists, nil
 }
 
 // ListByEvent returns all kelas tanding options with assignment flag for an event.
@@ -64,6 +63,7 @@ func (e *EventKelasTandingDB) ListByEvent(ctx context.Context, eventID uuid.UUID
 			kt.kategori,
 			kt.batas_berat,
 			kt.jenis_kelamin,
+			COALESCE(ekt.harga, 0) AS harga,
 			(ekt.id IS NOT NULL) AS is_assigned,
 			kt.created_at,
 			kt.updated_at
@@ -91,6 +91,7 @@ func (e *EventKelasTandingDB) ListByEvent(ctx context.Context, eventID uuid.UUID
 			&item.Kategori,
 			&batasBeratRaw,
 			&item.JenisKelamin,
+			&item.Harga,
 			&item.IsAssigned,
 			&item.CreatedAt,
 			&item.UpdatedAt,
@@ -117,39 +118,20 @@ func (e *EventKelasTandingDB) ListByEvent(ctx context.Context, eventID uuid.UUID
 	return items, nil
 }
 
-// AssignMany assigns many kelas tanding IDs to an event.
-func (e *EventKelasTandingDB) AssignMany(ctx context.Context, eventID uuid.UUID, kelasTandingIDs []uuid.UUID) error {
+// AssignOne assigns one kelas tanding ID to an event with a harga.
+func (e *EventKelasTandingDB) AssignOne(ctx context.Context, eventID, kelasTandingID uuid.UUID, harga int64) error {
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	if len(kelasTandingIDs) == 0 {
-		return nil
-	}
-
-	tx, err := e.db.Begin(queryCtx)
-	if err != nil {
-		return fmt.Errorf("begin event_kelas_tanding assignment tx: %w", err)
-	}
-	defer tx.Rollback(queryCtx)
-
 	query := `
-		INSERT INTO event_kelas_tanding (id, event_id, kelas_tanding_id)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (event_id, kelas_tanding_id) DO UPDATE SET updated_at = NOW()
+		INSERT INTO event_kelas_tanding (id, event_id, kelas_tanding_id, harga)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (event_id, kelas_tanding_id)
+		DO UPDATE SET harga = EXCLUDED.harga, updated_at = NOW()
 	`
 
-	batch := &pgx.Batch{}
-	for _, kelasTandingID := range kelasTandingIDs {
-		batch.Queue(query, uuid.New(), eventID, kelasTandingID)
-	}
-
-	br := tx.SendBatch(queryCtx, batch)
-	if err := br.Close(); err != nil {
+	if _, err := e.db.Exec(queryCtx, query, uuid.New(), eventID, kelasTandingID, harga); err != nil {
 		return fmt.Errorf("assign kelas_tanding to event: %w", err)
-	}
-
-	if err := tx.Commit(queryCtx); err != nil {
-		return fmt.Errorf("commit event_kelas_tanding assignment tx: %w", err)
 	}
 
 	return nil

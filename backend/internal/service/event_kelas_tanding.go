@@ -56,33 +56,16 @@ func (s *EventKelasTandingService) GetAssignments(ctx context.Context, eventID u
 	return result, nil
 }
 
-// AssignOne assigns one kelas tanding to an event.
-func (s *EventKelasTandingService) AssignOne(ctx context.Context, eventID, kelasTandingID uuid.UUID) (*models.EventKelasTandingAssignments, error) {
-	return s.AssignBulk(ctx, eventID, []uuid.UUID{kelasTandingID})
-}
-
-// AssignBulk assigns multiple kelas tanding to an event.
-func (s *EventKelasTandingService) AssignBulk(ctx context.Context, eventID uuid.UUID, kelasTandingIDs []uuid.UUID) (*models.EventKelasTandingAssignments, error) {
+// AssignOne assigns one kelas tanding to an event with a harga.
+func (s *EventKelasTandingService) AssignOne(ctx context.Context, eventID, kelasTandingID uuid.UUID, harga int64) (*models.EventKelasTandingAssignments, error) {
 	if eventID == uuid.Nil {
 		return nil, fmt.Errorf("event_id is required")
 	}
-
-	uniqueIDs := make([]uuid.UUID, 0, len(kelasTandingIDs))
-	seen := make(map[uuid.UUID]struct{}, len(kelasTandingIDs))
-
-	for _, id := range kelasTandingIDs {
-		if id == uuid.Nil {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		uniqueIDs = append(uniqueIDs, id)
+	if kelasTandingID == uuid.Nil {
+		return nil, fmt.Errorf("kelas_tanding_id is required")
 	}
-
-	if len(uniqueIDs) == 0 {
-		return nil, fmt.Errorf("kelas_tanding_ids is required")
+	if harga < 0 {
+		return nil, fmt.Errorf("harga cannot be negative")
 	}
 
 	exists, err := s.eventKelasTandingDB.EventExists(ctx, eventID)
@@ -93,15 +76,15 @@ func (s *EventKelasTandingService) AssignBulk(ctx context.Context, eventID uuid.
 		return nil, models.ErrNotFound
 	}
 
-	count, err := s.eventKelasTandingDB.CountKelasTandingIDs(ctx, uniqueIDs)
+	kelasTandingExists, err := s.eventKelasTandingDB.KelasTandingExists(ctx, kelasTandingID)
 	if err != nil {
 		return nil, err
 	}
-	if count != len(uniqueIDs) {
-		return nil, fmt.Errorf("one or more kelas_tanding_ids are invalid")
+	if !kelasTandingExists {
+		return nil, fmt.Errorf("kelas_tanding_id is invalid")
 	}
 
-	if err := s.eventKelasTandingDB.AssignMany(ctx, eventID, uniqueIDs); err != nil {
+	if err := s.eventKelasTandingDB.AssignOne(ctx, eventID, kelasTandingID, harga); err != nil {
 		return nil, err
 	}
 

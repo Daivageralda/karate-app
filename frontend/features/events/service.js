@@ -118,6 +118,7 @@ const normalizeEventKelasTanding = (rawValue = {}) => {
     kategori: normalizeText(rawValue.kategori),
     jenisKelamin: normalizeText(rawValue.jenis_kelamin),
     batasBerat: normalizeBatasBerat(rawValue.batas_berat),
+    harga: normalizeNumber(rawValue.harga),
     isAssigned: Boolean(rawValue.is_assigned),
     createdAt: normalizeText(rawValue.created_at),
     updatedAt: normalizeText(rawValue.updated_at),
@@ -492,9 +493,9 @@ export const getEventKelasTandingAssignments = async (eventId) => {
   };
 };
 
-export const assignEventKelasTanding = async (eventId, kelasTandingId) => {
-  if (!eventId || !kelasTandingId) {
-    throw new Error("Event ID dan Kelas Tanding ID wajib diisi");
+export const assignEventKelasTanding = async (eventId, kelasTandingId, harga) => {
+  if (!eventId || !kelasTandingId || !Number.isFinite(harga) || harga < 0) {
+    throw new Error("Event ID, Kelas Tanding ID, dan harga wajib diisi");
   }
 
   const response = await fetch(`/api/events/${eventId}/kelas-tanding`, {
@@ -502,39 +503,11 @@ export const assignEventKelasTanding = async (eventId, kelasTandingId) => {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ kelas_tanding_id: kelasTandingId }),
+    body: JSON.stringify({ kelas_tanding_id: kelasTandingId, harga }),
     cache: "no-store",
   });
 
   const envelope = await parseEnvelopeResponse(response, "Failed to assign kelas tanding to event");
-  const assignedItems = Array.isArray(envelope?.data?.assigned_items) ? envelope.data.assigned_items : [];
-  const unassignedItems = Array.isArray(envelope?.data?.unassigned_items) ? envelope.data.unassigned_items : [];
-
-  return {
-    assignedItems: assignedItems.map((item) => normalizeEventKelasTanding(item)),
-    unassignedItems: unassignedItems.map((item) => normalizeEventKelasTanding(item)),
-  };
-};
-
-export const bulkAssignEventKelasTanding = async (eventId, kelasTandingIds) => {
-  if (!eventId) {
-    throw new Error("Event ID wajib diisi");
-  }
-
-  if (!Array.isArray(kelasTandingIds) || kelasTandingIds.length === 0) {
-    throw new Error("Pilih minimal satu kelas tanding");
-  }
-
-  const response = await fetch(`/api/events/${eventId}/kelas-tanding/bulk`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ kelas_tanding_ids: kelasTandingIds }),
-    cache: "no-store",
-  });
-
-  const envelope = await parseEnvelopeResponse(response, "Failed to bulk assign kelas tanding to event");
   const assignedItems = Array.isArray(envelope?.data?.assigned_items) ? envelope.data.assigned_items : [];
   const unassignedItems = Array.isArray(envelope?.data?.unassigned_items) ? envelope.data.unassigned_items : [];
 

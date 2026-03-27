@@ -14,6 +14,7 @@ type EventKelasTandingItem struct {
 	Kategori     string      `json:"kategori"`
 	BatasBerat   *BatasBerat `json:"batas_berat,omitempty"`
 	JenisKelamin string      `json:"jenis_kelamin"`
+	Harga        int64       `json:"harga"`
 	IsAssigned   bool        `json:"is_assigned"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
@@ -28,9 +29,5 @@ type EventKelasTandingAssignments struct {
 // AssignEventKelasTandingInput represents single assignment payload.
 type AssignEventKelasTandingInput struct {
 	KelasTandingID uuid.UUID `json:"kelas_tanding_id"`
-}
-
-// AssignBulkEventKelasTandingInput represents bulk assignment payload.
-type AssignBulkEventKelasTandingInput struct {
-	KelasTandingIDs []uuid.UUID `json:"kelas_tanding_ids"`
+	Harga          *int64    `json:"harga"`
 }

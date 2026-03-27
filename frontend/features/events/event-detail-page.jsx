@@ -7,7 +7,6 @@ import { SiteShell } from "@/shared/components/site-shell";
 import { ROUTES } from "@/shared/config/routes";
 import {
   assignEventKelasTanding,
-  bulkAssignEventKelasTanding,
   downloadEventRegistrationDojosExcel,
   getEventKelasTandingAssignments,
   getEventRegistrationDojos,
@@ -21,12 +20,12 @@ const EVENT_DETAIL_TABS = [
     label: "Informasi Event",
   },
   {
-    key: "registrations",
-    label: "Pendaftaran Dojo",
-  },
-  {
     key: "kelas-tanding-settings",
     label: "Pengaturan Kelas Tanding",
+  },
+  {
+    key: "registrations",
+    label: "Pendaftaran Dojo",
   },
 ];
 
@@ -41,6 +40,12 @@ const KATEGORI_LABELS = {
   senior: "Senior",
   veteran: "Veteran",
 };
+
+const rupiahFormatter = new Intl.NumberFormat("id-ID", {
+  style: "currency",
+  currency: "IDR",
+  maximumFractionDigits: 0,
+});
 
 const getBatasBeratLabel = (item) => {
   if (item?.jenis !== "kumite") {
@@ -64,6 +69,15 @@ const getBatasBeratLabel = (item) => {
   }
 
   return `${bawah} - ${atas} kg`;
+};
+
+const formatHarga = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return "-";
+  }
+
+  return rupiahFormatter.format(amount);
 };
 
 const toMegabytes = (bytes) => {
@@ -207,11 +221,10 @@ export function EventDetailPage({ navigation, event }) {
   const [hasLoadedRegistrations, setHasLoadedRegistrations] = useState(false);
   const [assignedKelasTanding, setAssignedKelasTanding] = useState([]);
   const [unassignedKelasTanding, setUnassignedKelasTanding] = useState([]);
-  const [selectedBulkKelasTandingIds, setSelectedBulkKelasTandingIds] = useState([]);
+  const [kelasTandingHargaDrafts, setKelasTandingHargaDrafts] = useState({});
   const [isKelasTandingLoading, setIsKelasTandingLoading] = useState(false);
   const [kelasTandingError, setKelasTandingError] = useState("");
   const [hasLoadedKelasTanding, setHasLoadedKelasTanding] = useState(false);
-  const [isBulkAssigningKelasTanding, setIsBulkAssigningKelasTanding] = useState(false);
   const [singleKelasTandingActionId, setSingleKelasTandingActionId] = useState("");
 
   useEffect(() => {
@@ -265,7 +278,6 @@ export function EventDetailPage({ navigation, event }) {
         if (!isCancelled) {
           setAssignedKelasTanding(assignmentResult.assignedItems);
           setUnassignedKelasTanding(assignmentResult.unassignedItems);
-          setSelectedBulkKelasTandingIds([]);
         }
       } catch (error) {
         if (!isCancelled) {
@@ -296,18 +308,17 @@ export function EventDetailPage({ navigation, event }) {
     setKelasTandingError("");
   };
 
-  const handleToggleBulkKelasTanding = (kelasTandingId, isChecked) => {
+  const handleHargaDraftChange = (kelasTandingId, value) => {
     if (!kelasTandingId) {
       return;
     }
 
-    setSelectedBulkKelasTandingIds((prevValue) => {
-      if (isChecked) {
-        return prevValue.includes(kelasTandingId) ? prevValue : [...prevValue, kelasTandingId];
-      }
+    const sanitizedValue = value.replace(/[^0-9]/g, "");
 
-      return prevValue.filter((itemId) => itemId !== kelasTandingId);
-    });
+    setKelasTandingHargaDrafts((prevValue) => ({
+      ...prevValue,
+      [kelasTandingId]: sanitizedValue,
+    }));
   };
 
   const handleAssignSingleKelasTanding = async (kelasTandingId) => {
@@ -316,14 +327,30 @@ export function EventDetailPage({ navigation, event }) {
       return;
     }
 
+    const hargaDraft = String(kelasTandingHargaDrafts[kelasTandingId] || "").trim();
+    if (!hargaDraft) {
+      setKelasTandingError("Harga wajib diisi sebelum assign kelas tanding");
+      return;
+    }
+
+    const harga = Number.parseInt(hargaDraft, 10);
+    if (Number.isNaN(harga) || harga < 0) {
+      setKelasTandingError("Harga harus berupa angka 0 atau lebih besar");
+      return;
+    }
+
     setKelasTandingError("");
     setSingleKelasTandingActionId(kelasTandingId);
 
     try {
-      const assignmentResult = await assignEventKelasTanding(event.id, kelasTandingId);
+      const assignmentResult = await assignEventKelasTanding(event.id, kelasTandingId, harga);
       setAssignedKelasTanding(assignmentResult.assignedItems);
       setUnassignedKelasTanding(assignmentResult.unassignedItems);
-      setSelectedBulkKelasTandingIds((prevValue) => prevValue.filter((itemId) => itemId !== kelasTandingId));
+      setKelasTandingHargaDrafts((prevValue) => {
+        const nextValue = { ...prevValue };
+        delete nextValue[kelasTandingId];
+        return nextValue;
+      });
     } catch (error) {
       setKelasTandingError(error?.message || "Gagal assign kelas tanding ke event");
     } finally {
@@ -348,32 +375,6 @@ export function EventDetailPage({ navigation, event }) {
       setKelasTandingError(error?.message || "Gagal melepas kelas tanding dari event");
     } finally {
       setSingleKelasTandingActionId("");
-    }
-  };
-
-  const handleBulkAssignKelasTanding = async () => {
-    if (!event?.id) {
-      setKelasTandingError("Event ID tidak ditemukan");
-      return;
-    }
-
-    if (selectedBulkKelasTandingIds.length === 0) {
-      setKelasTandingError("Pilih minimal satu kelas tanding untuk bulk assign");
-      return;
-    }
-
-    setKelasTandingError("");
-    setIsBulkAssigningKelasTanding(true);
-
-    try {
-      const assignmentResult = await bulkAssignEventKelasTanding(event.id, selectedBulkKelasTandingIds);
-      setAssignedKelasTanding(assignmentResult.assignedItems);
-      setUnassignedKelasTanding(assignmentResult.unassignedItems);
-      setSelectedBulkKelasTandingIds([]);
-    } catch (error) {
-      setKelasTandingError(error?.message || "Gagal bulk assign kelas tanding ke event");
-    } finally {
-      setIsBulkAssigningKelasTanding(false);
     }
   };
 
@@ -699,7 +700,7 @@ export function EventDetailPage({ navigation, event }) {
             <div>
               <h2 className="font-display text-xl font-semibold tracking-tight text-app-text-primary">Pengaturan Kelas Tanding</h2>
               <p className="mt-2 text-sm text-app-text-secondary">
-                Assign master kelas tanding ke event ini secara bulk maupun satu per satu.
+                Assign master kelas tanding ke event ini satu per satu dengan harga per kelas tanding.
               </p>
             </div>
 
@@ -735,17 +736,8 @@ export function EventDetailPage({ navigation, event }) {
               <div className="mt-6 rounded-2xl border border-app-border bg-app-surface-muted p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-app-text-secondary">
-                    Pilih kelas tanding yang belum ter-assign, lalu assign sekaligus ke event.
+                    Isi harga di baris kelas tanding yang belum ter-assign, lalu assign satu per satu.
                   </p>
-
-                  <button
-                    type="button"
-                    onClick={handleBulkAssignKelasTanding}
-                    disabled={isBulkAssigningKelasTanding || selectedBulkKelasTandingIds.length === 0}
-                    className="inline-flex items-center justify-center rounded-full border border-app-accent bg-app-accent px-4 py-2 text-sm font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isBulkAssigningKelasTanding ? "Memproses Bulk Assign..." : `Bulk Assign (${selectedBulkKelasTandingIds.length})`}
-                  </button>
                 </div>
               </div>
 
@@ -758,12 +750,12 @@ export function EventDetailPage({ navigation, event }) {
                   <table className="min-w-max w-full text-left text-sm">
                     <thead className="bg-app-surface-muted text-app-text-primary">
                       <tr>
-                        <th className="px-4 py-3 font-semibold">Pilih</th>
                         <th className="px-4 py-3 font-semibold">Nama</th>
                         <th className="px-4 py-3 font-semibold">Jenis</th>
                         <th className="px-4 py-3 font-semibold">Kategori</th>
                         <th className="px-4 py-3 font-semibold">Jenis Kelamin</th>
                         <th className="px-4 py-3 font-semibold">Batas Berat</th>
+                        <th className="px-4 py-3 font-semibold">Harga</th>
                         <th className="px-4 py-3 font-semibold">Status Assign</th>
                         <th className="px-4 py-3 font-semibold">Aksi</th>
                       </tr>
@@ -772,25 +764,33 @@ export function EventDetailPage({ navigation, event }) {
                       {[...assignedKelasTanding, ...unassignedKelasTanding].map((item) => {
                         const isAssigned = item.isAssigned;
                         const isLoadingAction = singleKelasTandingActionId === item.id;
-                        const isSelectable = !isAssigned;
-                        const isChecked = selectedBulkKelasTandingIds.includes(item.id);
+                        const hargaDraft = kelasTandingHargaDrafts[item.id] ?? "";
+                        const hasValidHargaDraft = hargaDraft !== "" && !Number.isNaN(Number.parseInt(hargaDraft, 10));
 
                         return (
                           <tr key={item.id} className="border-t border-app-border align-top">
-                            <td className="px-4 py-3">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                disabled={!isSelectable || isBulkAssigningKelasTanding || isLoadingAction}
-                                onChange={(eventItem) => handleToggleBulkKelasTanding(item.id, eventItem.target.checked)}
-                                className="h-4 w-4 rounded border-app-border text-app-accent focus:ring-app-accent"
-                              />
-                            </td>
                             <td className="px-4 py-3 text-app-text-primary font-semibold">{formatText(item.nama)}</td>
                             <td className="px-4 py-3 text-app-text-secondary">{formatText(item.jenis).toUpperCase()}</td>
                             <td className="px-4 py-3 text-app-text-secondary">{KATEGORI_LABELS[item.kategori] || formatText(item.kategori)}</td>
                             <td className="px-4 py-3 text-app-text-secondary">{formatText(item.jenisKelamin)}</td>
                             <td className="px-4 py-3 text-app-text-secondary">{getBatasBeratLabel(item)}</td>
+                            <td className="px-4 py-3 text-app-text-secondary">
+                              {isAssigned ? (
+                                <span className="font-medium text-app-text-primary">{formatHarga(item.harga)}</span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1000"
+                                  inputMode="numeric"
+                                  value={hargaDraft}
+                                  onChange={(eventItem) => handleHargaDraftChange(item.id, eventItem.target.value)}
+                                  disabled={isLoadingAction}
+                                  placeholder="Contoh: 150000"
+                                  className="w-40 rounded-xl border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text-primary outline-none transition focus:border-app-accent disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                              )}
+                            </td>
                             <td className="px-4 py-3">
                               <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${isAssigned ? "bg-green-100 text-green-700" : "bg-app-surface-muted text-app-text-secondary"}`}>
                                 {isAssigned ? "Assigned" : "Belum Assigned"}
@@ -801,7 +801,7 @@ export function EventDetailPage({ navigation, event }) {
                                 <button
                                   type="button"
                                   onClick={() => handleUnassignSingleKelasTanding(item.id)}
-                                  disabled={isLoadingAction || isBulkAssigningKelasTanding}
+                                  disabled={isLoadingAction}
                                   className="inline-flex whitespace-nowrap rounded-full border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   {isLoadingAction ? "Melepas..." : "Unassign"}
@@ -810,7 +810,7 @@ export function EventDetailPage({ navigation, event }) {
                                 <button
                                   type="button"
                                   onClick={() => handleAssignSingleKelasTanding(item.id)}
-                                  disabled={isLoadingAction || isBulkAssigningKelasTanding}
+                                  disabled={isLoadingAction || !hasValidHargaDraft}
                                   className="inline-flex whitespace-nowrap rounded-full border border-app-accent bg-app-accent px-3 py-1.5 text-xs font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   {isLoadingAction ? "Assign..." : "Assign"}

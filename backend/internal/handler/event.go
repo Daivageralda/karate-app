@@ -263,36 +263,12 @@ func (h *EventHandler) AssignKelasTanding(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	assignments, err := h.eventKelasTandingService.AssignOne(c.Request.Context(), eventID, input.KelasTandingID)
-	if err != nil {
-		switch {
-		case errors.Is(err, models.ErrNotFound):
-			response.Error(c, http.StatusNotFound, "event not found")
-		default:
-			response.Error(c, http.StatusBadRequest, err.Error())
-		}
+	if input.Harga == nil {
+		response.Error(c, http.StatusBadRequest, "harga is required")
 		return
 	}
 
-	response.Success(c, http.StatusOK, "kelas tanding assigned to event", assignments)
-}
-
-// AssignKelasTandingBulk handles POST /api/v1/events/:id/kelas-tanding/bulk
-func (h *EventHandler) AssignKelasTandingBulk(c *gin.Context) {
-	eventID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "invalid event id")
-		return
-	}
-
-	var input models.AssignBulkEventKelasTandingInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	assignments, err := h.eventKelasTandingService.AssignBulk(c.Request.Context(), eventID, input.KelasTandingIDs)
+	assignments, err := h.eventKelasTandingService.AssignOne(c.Request.Context(), eventID, input.KelasTandingID, *input.Harga)
 	if err != nil {
 		switch {
 		case errors.Is(err, models.ErrNotFound):
