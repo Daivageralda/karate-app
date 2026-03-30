@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 
 import { SiteShell } from "@/shared/components/site-shell";
@@ -14,6 +15,7 @@ import {
   uploadParticipantDocument,
   uploadRecommendationLetter,
   uploadRegistrationPayment,
+  createRegistrationPaymentInvoice,
   getRecommendationLetter,
   getRegistrationPayment,
   deleteParticipantFromDojoRegistration,
@@ -263,8 +265,10 @@ const formatGender = (value) => {
 
 export function DojoEventDetailPage({ navigation, event }) {
   const { showToast } = useToast();
+  const searchParams = useSearchParams();
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState("status");
+  const [lastNonPaymentTab, setLastNonPaymentTab] = useState("status");
   const [isLoading, setIsLoading] = useState(false);
   const [statusSummary, setStatusSummary] = useState(null);
   const [participants, setParticipants] = useState([]);
@@ -280,9 +284,11 @@ export function DojoEventDetailPage({ navigation, event }) {
   const [recommendationLetterFile, setRecommendationLetterFile] = useState(null);
   const [recommendationLetterData, setRecommendationLetterData] = useState(null);
   const [isRecommendationUploading, setIsRecommendationUploading] = useState(false);
-  const [registrationPaymentFile, setRegistrationPaymentFile] = useState(null);
   const [registrationPaymentData, setRegistrationPaymentData] = useState(null);
+  const [registrationPaymentFile, setRegistrationPaymentFile] = useState(null);
+  const [selectedRegistrationPaymentMethod, setSelectedRegistrationPaymentMethod] = useState("xendit");
   const [isRegistrationPaymentUploading, setIsRegistrationPaymentUploading] = useState(false);
+  const [isRegistrationPaymentInvoiceLoading, setIsRegistrationPaymentInvoiceLoading] = useState(false);
   const [participantDeleteMap, setParticipantDeleteMap] = useState({});
   const participantDocumentInputRefs = useRef({});
   const recommendationLetterInputRef = useRef(null);
@@ -290,6 +296,17 @@ export function DojoEventDetailPage({ navigation, event }) {
 
   const eventId = event?.id;
   const dojoId = currentUser?.dojoId;
+
+  const buildPaymentRedirectUrl = useCallback((result) => {
+    if (typeof window === "undefined" || !eventId) {
+      return "";
+    }
+
+    const redirectUrl = new URL(ROUTES.dashboardDojoEventRegister(eventId), window.location.origin);
+    redirectUrl.searchParams.set("payment_result", result);
+    redirectUrl.searchParams.set("active_tab", "status");
+    return redirectUrl.toString();
+  }, [eventId]);
 
   const loadEventRegistrationData = useCallback(async () => {
     if (!eventId || !dojoId) {
@@ -342,6 +359,62 @@ export function DojoEventDetailPage({ navigation, event }) {
 
     loadEventRegistrationData();
   }, [eventId, dojoId, loadEventRegistrationData]);
+
+  useEffect(() => {
+    if (activeTab !== "pembayaran") {
+      setLastNonPaymentTab(activeTab);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    const paymentResult = searchParams.get("payment_result");
+    const activeTabParam = searchParams.get("active_tab");
+
+    if (!paymentResult && !activeTabParam) {
+      return;
+    }
+
+    if (paymentResult) {
+      setActiveTab("status");
+    } else if (["status", "peserta", "dokumen", "rekomendasi", "pembayaran"].includes(activeTabParam)) {
+      setActiveTab(activeTabParam);
+    }
+
+    if (paymentResult === "success") {
+      showToast({
+        tone: "success",
+        title: "Pembayaran Selesai",
+        message: "Kamu sudah kembali dari Xendit. Status pembayaran sedang diperbarui.",
+      });
+    } else if (paymentResult === "failure") {
+      showToast({
+        tone: "error",
+        title: "Pembayaran Belum Selesai",
+        message: "Pembayaran dibatalkan atau gagal. Kamu bisa coba lagi dari tab pembayaran.",
+      });
+    }
+
+    if (dojoId && eventId) {
+      void loadEventRegistrationData();
+    }
+
+    if (typeof window !== "undefined") {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete("payment_result");
+      nextUrl.searchParams.delete("active_tab");
+      window.history.replaceState({}, "", nextUrl.toString());
+    }
+  }, [dojoId, eventId, loadEventRegistrationData, searchParams, showToast]);
+
+  useEffect(() => {
+    const provider = typeof registrationPaymentData?.payment_provider === "string"
+      ? registrationPaymentData.payment_provider.trim().toLowerCase()
+      : "";
+
+    if (provider === "manual" || provider === "xendit") {
+      setSelectedRegistrationPaymentMethod(provider);
+    }
+  }, [registrationPaymentData]);
 
   const handleDownloadTemplate = useCallback(async () => {
     try {
@@ -699,7 +772,7 @@ export function DojoEventDetailPage({ navigation, event }) {
     }, 60 * 1000);
   }, [recommendationLetterFile, showToast]);
 
-  const handleUploadRegistrationPayment = useCallback(async () => {
+  const handleCreateRegistrationPaymentInvoice = useCallback(async () => {
     if (!eventId || !dojoId) {
       showToast({
         tone: "error",
@@ -709,37 +782,55 @@ export function DojoEventDetailPage({ navigation, event }) {
       return;
     }
 
-    if (!registrationPaymentFile) {
+    if (selectedRegistrationPaymentMethod !== "xendit") {
       showToast({
         tone: "error",
-        title: "File Required",
-        message: "Pilih file bukti pendaftaran terlebih dahulu.",
+        title: "Metode Tidak Sesuai",
+        message: "Pilih metode pembayaran online (Xendit) untuk membuat invoice.",
       });
       return;
     }
 
-    setIsRegistrationPaymentUploading(true);
+    if (!recommendationLetterData?.file_path) {
+      showToast({
+        tone: "error",
+        title: "Step Belum Aktif",
+        message: "Pembayaran aktif setelah surat rekomendasi berhasil diupload.",
+      });
+      return;
+    }
+
+    setIsRegistrationPaymentInvoiceLoading(true);
     try {
-      await uploadRegistrationPayment(eventId, dojoId, registrationPaymentFile);
-      setRegistrationPaymentFile(null);
-      setRegistrationPaymentData(null);
+      const paymentInvoice = await createRegistrationPaymentInvoice(eventId, dojoId, {
+        successUrl: buildPaymentRedirectUrl("success"),
+        failureUrl: buildPaymentRedirectUrl("failure"),
+      });
+      const invoiceURL = paymentInvoice?.xendit_invoice_url;
+
+      if (!invoiceURL) {
+        throw new Error("Invoice URL belum tersedia dari Xendit");
+      }
+
+      window.location.assign(invoiceURL);
+
       showToast({
         tone: "success",
-        title: "Upload Successful",
-        message: "Bukti pendaftaran berhasil diunggah.",
+        title: "Invoice Created",
+        message: "Halaman pembayaran Xendit berhasil dibuat dan dibuka.",
       });
 
       await loadEventRegistrationData();
     } catch (error) {
       showToast({
         tone: "error",
-        title: "Upload Failed",
-        message: error?.message || "Gagal mengunggah bukti pendaftaran",
+        title: "Invoice Failed",
+        message: error?.message || "Gagal membuat invoice pembayaran Xendit",
       });
     } finally {
-      setIsRegistrationPaymentUploading(false);
+      setIsRegistrationPaymentInvoiceLoading(false);
     }
-  }, [dojoId, eventId, loadEventRegistrationData, registrationPaymentFile, showToast]);
+  }, [buildPaymentRedirectUrl, dojoId, eventId, loadEventRegistrationData, recommendationLetterData, selectedRegistrationPaymentMethod, showToast]);
 
   const handleRegistrationPaymentFileChange = useCallback((file) => {
     setRegistrationPaymentFile(file || null);
@@ -749,12 +840,12 @@ export function DojoEventDetailPage({ navigation, event }) {
     registrationPaymentInputRef.current?.click();
   }, []);
 
-  const handlePreviewRegistrationPayment = useCallback(() => {
+  const handlePreviewRegistrationPaymentFile = useCallback(() => {
     if (!registrationPaymentFile) {
       showToast({
         tone: "error",
         title: "File Required",
-        message: "Pilih file bukti pendaftaran terlebih dahulu untuk preview.",
+        message: "Pilih file bukti transfer terlebih dahulu untuk preview.",
       });
       return;
     }
@@ -766,6 +857,64 @@ export function DojoEventDetailPage({ navigation, event }) {
       window.URL.revokeObjectURL(previewUrl);
     }, 60 * 1000);
   }, [registrationPaymentFile, showToast]);
+
+  const handleUploadRegistrationPayment = useCallback(async () => {
+    if (!eventId || !dojoId) {
+      showToast({
+        tone: "error",
+        title: "Event Not Ready",
+        message: "Event ID atau Dojo ID tidak ditemukan.",
+      });
+      return;
+    }
+
+    if (selectedRegistrationPaymentMethod !== "manual") {
+      showToast({
+        tone: "error",
+        title: "Metode Tidak Sesuai",
+        message: "Pilih metode transfer manual untuk upload bukti pembayaran.",
+      });
+      return;
+    }
+
+    if (!registrationPaymentFile) {
+      showToast({
+        tone: "error",
+        title: "File Required",
+        message: "Pilih file bukti transfer terlebih dahulu.",
+      });
+      return;
+    }
+
+    if (!recommendationLetterData?.file_path) {
+      showToast({
+        tone: "error",
+        title: "Step Belum Aktif",
+        message: "Pembayaran aktif setelah surat rekomendasi berhasil diupload.",
+      });
+      return;
+    }
+
+    setIsRegistrationPaymentUploading(true);
+    try {
+      await uploadRegistrationPayment(eventId, dojoId, registrationPaymentFile);
+      setRegistrationPaymentFile(null);
+      showToast({
+        tone: "success",
+        title: "Upload Successful",
+        message: "Bukti transfer berhasil diunggah dan menunggu verifikasi admin.",
+      });
+      await loadEventRegistrationData();
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Upload Failed",
+        message: error?.message || "Gagal mengunggah bukti transfer",
+      });
+    } finally {
+      setIsRegistrationPaymentUploading(false);
+    }
+  }, [dojoId, eventId, loadEventRegistrationData, recommendationLetterData, registrationPaymentFile, selectedRegistrationPaymentMethod, showToast]);
 
   const handleDeleteParticipant = useCallback(async (participantId, participantName) => {
     if (!eventId || !dojoId) {
@@ -831,7 +980,13 @@ export function DojoEventDetailPage({ navigation, event }) {
   const allAthletsApproved = totalParticipants > 0 && approvedParticipants >= totalParticipants;
   const totalNominal = Number(statusSummary?.total_nominal || 0);
   const recommendationStatus = statusSummary?.recommendation_letter_status || "not_uploaded";
-  const registrationPaymentStatus = statusSummary?.registration_payment_status || "not_uploaded";
+  const registrationPaymentStatus = registrationPaymentData?.xendit_status
+    ? String(registrationPaymentData.xendit_status).trim().toLowerCase() === "settled"
+      ? "approved"
+      : String(registrationPaymentData.xendit_status).trim().toLowerCase() === "paid"
+        ? "approved"
+        : String(registrationPaymentData.xendit_status).trim().toLowerCase()
+    : statusSummary?.registration_payment_status || "not_uploaded";
   const recommendationLabel = recommendationStatus === "approved"
     ? "Disetujui"
     : recommendationStatus === "pending"
@@ -840,8 +995,12 @@ export function DojoEventDetailPage({ navigation, event }) {
   const registrationPaymentLabel = registrationPaymentStatus === "approved"
     ? "Terverifikasi"
     : registrationPaymentStatus === "pending"
-      ? "Sudah Diupload"
-      : "Belum Diupload";
+      ? "Menunggu Pembayaran"
+      : registrationPaymentStatus === "failed"
+        ? "Gagal"
+        : registrationPaymentStatus === "expired"
+          ? "Kadaluarsa"
+          : "Belum Dibuat";
   const registrationPaymentApproved = registrationPaymentStatus === "approved";
   const recommendationLetterApproved = recommendationStatus === "approved";
   const recommendationUploadAllowed = allDocumentsUploaded && recommendationStatus !== "approved";
@@ -851,9 +1010,26 @@ export function DojoEventDetailPage({ navigation, event }) {
   const hasUploadedRecommendation = recommendationFilePath.length > 0;
   const uploadedRecommendationIsPdf = isPdfDocumentPath(recommendationFilePath);
   const registrationPaymentFilePath = registrationPaymentData?.file_path || "";
-  const registrationPaymentFileUrl = resolveUploadedDocumentUrl(registrationPaymentFilePath);
-  const hasUploadedRegistrationPayment = registrationPaymentFilePath.length > 0;
-  const uploadedRegistrationPaymentIsPdf = isPdfDocumentPath(registrationPaymentFilePath);
+  const registrationPaymentInvoiceURL = registrationPaymentData?.xendit_invoice_url || "";
+  const paymentProviderFromData = typeof registrationPaymentData?.payment_provider === "string"
+    ? registrationPaymentData.payment_provider.trim().toLowerCase()
+    : "";
+  const inferredRegistrationPaymentMethod = paymentProviderFromData === "manual" || paymentProviderFromData === "xendit"
+    ? paymentProviderFromData
+    : registrationPaymentData?.xendit_invoice_id || registrationPaymentInvoiceURL.length > 0
+      ? "xendit"
+      : registrationPaymentFilePath.length > 0
+        ? "manual"
+        : "";
+  const effectiveRegistrationPaymentMethod = inferredRegistrationPaymentMethod || selectedRegistrationPaymentMethod;
+  const registrationPaymentMethodLocked = inferredRegistrationPaymentMethod.length > 0;
+  const isManualPaymentMethod = effectiveRegistrationPaymentMethod === "manual";
+  const isXenditPaymentMethod = effectiveRegistrationPaymentMethod === "xendit";
+  const hasUploadedRegistrationPayment = Boolean(
+    registrationPaymentFilePath.length > 0 ||
+    registrationPaymentData?.xendit_invoice_id ||
+    registrationPaymentInvoiceURL.length > 0
+  );
   const registrationPaymentUploadAllowed = hasUploadedRecommendation;
   const isRegistrationCompleted =
     totalParticipants > 0 &&
@@ -898,8 +1074,8 @@ export function DojoEventDetailPage({ navigation, event }) {
     {
       key: "pembayaran",
       step: "Tahap 4",
-      shortLabel: "Bukti Bayar",
-      fullLabel: "Upload Bukti Pendaftaran",
+      shortLabel: "Pembayaran",
+      fullLabel: "Pembayaran via Xendit",
       disabled: !hasUploadedRecommendation,
     },
   ];
@@ -1632,84 +1808,136 @@ export function DojoEventDetailPage({ navigation, event }) {
         {activeTab === "pembayaran" && hasParticipants && (
           <section>
             <ActionBlock
-              title="Upload Bukti Pendaftaran"
-              description={`Upload bukti pembayaran pendaftaran dojo. Total nominal saat ini ${formatCurrency(totalNominal)}.`}
+              title="Pembayaran Pendaftaran"
+              description={`Pilih satu metode pembayaran untuk dojo ini. Setelah dipakai, metode akan dikunci. Total nominal saat ini ${formatCurrency(totalNominal)}.`}
               isActive={registrationPaymentUploadAllowed}
               isCompleted={registrationPaymentApproved}
             >
               <div className="space-y-3">
-                <input
-                  ref={registrationPaymentInputRef}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => handleRegistrationPaymentFileChange(e.target.files?.[0] || null)}
-                  disabled={isRegistrationPaymentUploading || !registrationPaymentUploadAllowed}
-                  className="hidden"
-                />
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {registrationPaymentFile ? (
-                    <div className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text-primary">
-                      <p className="truncate whitespace-nowrap font-medium">{registrationPaymentFile.name}</p>
-                    </div>
-                  ) : registrationPaymentData?.file_path ? (
-                    <div className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text-primary">
-                      <p className="truncate whitespace-nowrap font-medium">{extractFileName(registrationPaymentData.file_path)}</p>
-                    </div>
-                  ) : (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-app-text-secondary">Metode Pembayaran</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <button
                       type="button"
-                      onClick={openRegistrationPaymentPicker}
-                      disabled={isRegistrationPaymentUploading || !registrationPaymentUploadAllowed}
-                      className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-left text-sm font-medium text-app-text-primary transition hover:border-app-accent hover:text-app-accent disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setSelectedRegistrationPaymentMethod("manual")}
+                      disabled={registrationPaymentMethodLocked || registrationPaymentApproved || !registrationPaymentUploadAllowed}
+                      className={`rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${isManualPaymentMethod ? "border-app-accent bg-app-accent/10 text-app-accent" : "border-app-border bg-app-surface text-app-text-primary hover:border-app-accent hover:text-app-accent"}`}
                     >
-                      Pilih File Bukti Pendaftaran
+                      Transfer Manual
                     </button>
-                  )}
-
-                  {registrationPaymentFile && (
                     <button
                       type="button"
-                      onClick={handlePreviewRegistrationPayment}
-                      className="rounded-full border border-app-border bg-app-surface px-4 py-2 text-sm font-semibold text-app-text-primary transition hover:border-app-accent hover:text-app-accent"
+                      onClick={() => setSelectedRegistrationPaymentMethod("xendit")}
+                      disabled={registrationPaymentMethodLocked || registrationPaymentApproved || !registrationPaymentUploadAllowed}
+                      className={`rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${isXenditPaymentMethod ? "border-app-accent bg-app-accent/10 text-app-accent" : "border-app-border bg-app-surface text-app-text-primary hover:border-app-accent hover:text-app-accent"}`}
                     >
-                      Lihat File
+                      Online (Xendit)
                     </button>
+                  </div>
+                  {registrationPaymentMethodLocked && (
+                    <p className="text-xs text-app-text-secondary">
+                      Metode terkunci: {isManualPaymentMethod ? "Transfer Manual" : "Online (Xendit)"}.
+                    </p>
                   )}
-
-                  <button
-                    onClick={handleUploadRegistrationPayment}
-                    disabled={!registrationPaymentFile || isRegistrationPaymentUploading || !registrationPaymentUploadAllowed}
-                    className="inline-flex items-center justify-center rounded-full bg-app-accent px-4 py-2 text-sm font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isRegistrationPaymentUploading ? "Uploading..." : "Upload Bukti Pendaftaran"}
-                  </button>
                 </div>
 
-                {(registrationPaymentFile || hasUploadedRegistrationPayment) && (
-                  <button
-                    type="button"
-                    onClick={openRegistrationPaymentPicker}
-                    className="text-xs font-semibold text-app-accent hover:underline"
-                  >
-                    Ganti File
-                  </button>
+                {isManualPaymentMethod ? (
+                  <>
+                    <input
+                      ref={registrationPaymentInputRef}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      onChange={(e) => handleRegistrationPaymentFileChange(e.target.files?.[0] || null)}
+                      disabled={isRegistrationPaymentUploading || !registrationPaymentUploadAllowed || registrationPaymentApproved}
+                      className="hidden"
+                    />
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {registrationPaymentFile ? (
+                        <div className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text-primary">
+                          <p className="truncate whitespace-nowrap font-medium">{registrationPaymentFile.name}</p>
+                        </div>
+                      ) : registrationPaymentFilePath ? (
+                        <div className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text-primary">
+                          <p className="truncate whitespace-nowrap font-medium">{extractFileName(registrationPaymentFilePath)}</p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={openRegistrationPaymentPicker}
+                          disabled={isRegistrationPaymentUploading || !registrationPaymentUploadAllowed || registrationPaymentApproved}
+                          className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-left text-sm font-medium text-app-text-primary transition hover:border-app-accent hover:text-app-accent disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Pilih File Bukti Transfer
+                        </button>
+                      )}
+
+                      {registrationPaymentFile && (
+                        <button
+                          type="button"
+                          onClick={handlePreviewRegistrationPaymentFile}
+                          className="rounded-full border border-app-border bg-app-surface px-4 py-2 text-sm font-semibold text-app-text-primary transition hover:border-app-accent hover:text-app-accent"
+                        >
+                          Lihat File
+                        </button>
+                      )}
+
+                      <button
+                        onClick={handleUploadRegistrationPayment}
+                        disabled={!registrationPaymentFile || isRegistrationPaymentUploading || !registrationPaymentUploadAllowed || registrationPaymentApproved}
+                        className="inline-flex items-center justify-center rounded-full bg-app-accent px-4 py-2 text-sm font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isRegistrationPaymentUploading ? "Uploading..." : registrationPaymentApproved ? "Pembayaran Lunas" : "Upload Bukti Transfer"}
+                      </button>
+                    </div>
+
+                    {(registrationPaymentFile || registrationPaymentFilePath) && !registrationPaymentApproved && (
+                      <button
+                        type="button"
+                        onClick={openRegistrationPaymentPicker}
+                        disabled={isRegistrationPaymentUploading || !registrationPaymentUploadAllowed}
+                        className="text-xs font-semibold text-app-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Ganti File
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {registrationPaymentData?.xendit_invoice_id ? (
+                      <div className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text-primary">
+                        <p className="truncate whitespace-nowrap font-medium">Invoice: {registrationPaymentData.xendit_invoice_id}</p>
+                      </div>
+                    ) : (
+                      <div className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text-secondary">
+                        Belum ada invoice pembayaran.
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleCreateRegistrationPaymentInvoice}
+                      disabled={isRegistrationPaymentInvoiceLoading || !registrationPaymentUploadAllowed || registrationPaymentApproved}
+                      className="inline-flex items-center justify-center rounded-full bg-app-accent px-4 py-2 text-sm font-semibold text-app-accent-contrast transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isRegistrationPaymentInvoiceLoading ? "Creating Invoice..." : registrationPaymentApproved ? "Pembayaran Lunas" : "Buat / Perbarui Invoice"}
+                    </button>
+                  </div>
                 )}
 
                 <div className="max-h-40 overflow-auto rounded-lg border border-app-border">
                   <table className="min-w-full text-left text-xs">
                     <thead className="sticky top-0 bg-app-surface-muted text-app-text-primary">
                       <tr>
-                        <th className="px-3 py-2 font-semibold">Berkas Tersimpan</th>
+                        <th className="px-3 py-2 font-semibold">Bukti / Invoice</th>
                         <th className="px-3 py-2 font-semibold">Status</th>
-                        <th className="px-3 py-2 font-semibold">Diunggah</th>
+                        <th className="px-3 py-2 font-semibold">Dibuat</th>
                       </tr>
                     </thead>
                     <tbody>
                       {hasUploadedRegistrationPayment ? (
                         <tr className="border-t border-app-border">
                           <td className="px-3 py-2 text-app-text-primary">
-                            <p className="truncate whitespace-nowrap">{extractFileName(registrationPaymentFilePath)}</p>
+                            <p className="truncate whitespace-nowrap">{registrationPaymentData?.xendit_invoice_id || extractFileName(registrationPaymentFilePath)}</p>
                           </td>
                           <td className="px-3 py-2 text-app-text-secondary">{registrationPaymentLabel}</td>
                           <td className="px-3 py-2 text-app-text-secondary">
@@ -1721,7 +1949,7 @@ export function DojoEventDetailPage({ navigation, event }) {
                       ) : (
                         <tr className="border-t border-app-border">
                           <td colSpan={3} className="px-3 py-3 text-app-text-secondary">
-                            Belum ada bukti pendaftaran yang tersimpan.
+                            Belum ada data pembayaran yang tersimpan.
                           </td>
                         </tr>
                       )}
@@ -1729,25 +1957,15 @@ export function DojoEventDetailPage({ navigation, event }) {
                   </table>
                 </div>
 
-                {hasUploadedRegistrationPayment && uploadedRegistrationPaymentIsPdf && registrationPaymentFileUrl && (
-                  <div className="overflow-hidden rounded-lg border border-app-border">
-                    <iframe
-                      title="preview-bukti-pendaftaran"
-                      src={registrationPaymentFileUrl}
-                      className="h-112 w-full"
-                    />
-                  </div>
-                )}
-
-                {hasUploadedRegistrationPayment && !uploadedRegistrationPaymentIsPdf && (
+                {registrationPaymentData?.xendit_status && isXenditPaymentMethod ? (
                   <p className="text-xs text-app-text-secondary">
-                    Preview inline hanya tersedia untuk file PDF. Untuk file ini, gunakan tombol Buka.
+                    Status gateway: {registrationPaymentData.xendit_status}
                   </p>
-                )}
+                ) : null}
 
                 {!registrationPaymentUploadAllowed && (
                   <p className="text-xs text-app-text-secondary">
-                    Upload bukti pendaftaran aktif setelah surat rekomendasi berhasil diupload.
+                    Pembayaran aktif setelah surat rekomendasi berhasil diupload.
                   </p>
                 )}
               </div>

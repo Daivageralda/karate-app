@@ -373,6 +373,30 @@ export const uploadRegistrationPayment = async (eventId, dojoId, file) => {
   return envelope?.data || {};
 };
 
+export const createRegistrationPaymentInvoice = async (eventId, dojoId, options = {}) => {
+  if (!eventId || !dojoId) {
+    throw new Error("Event ID and Dojo ID are required");
+  }
+
+  const response = await fetch(
+    `/api/events/${eventId}/dojos/${dojoId}/registration-payment/invoice`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        success_url: options.successUrl || "",
+        failure_url: options.failureUrl || "",
+      }),
+      cache: "no-store",
+    }
+  );
+
+  const envelope = await parseEnvelopeResponse(response, "Failed to create Xendit payment invoice");
+  return envelope?.data || null;
+};
+
 export const getRecommendationLetter = async (eventId, dojoId) => {
   if (!eventId || !dojoId) {
     throw new Error("Event ID and Dojo ID are required");
