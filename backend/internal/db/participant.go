@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,41 @@ import (
 // ParticipantDB handles all participant-related database operations
 type ParticipantDB struct {
 	db *pgxpool.Pool
+}
+
+type registrationPaymentScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRegistrationPayment(row registrationPaymentScanner) (*models.DojoRegistrationPayment, error) {
+	var payment models.DojoRegistrationPayment
+	var filePath *string
+
+	err := row.Scan(
+		&payment.ID,
+		&payment.DojoID,
+		&payment.EventID,
+		&filePath,
+		&payment.UploadedAt,
+		&payment.UpdatedAt,
+		&payment.Status,
+		&payment.PaymentProvider,
+		&payment.XenditInvoiceID,
+		&payment.XenditExternalID,
+		&payment.XenditInvoiceURL,
+		&payment.XenditStatus,
+		&payment.XenditExpiryDate,
+		&payment.XenditPaidAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if filePath != nil {
+		payment.FilePath = *filePath
+	}
+
+	return &payment, nil
 }
 
 // NewParticipantDB creates a new ParticipantDB instance
@@ -283,24 +319,209 @@ func (p *ParticipantDB) CreateRegistrationPayment(
 
 	id := uuid.New()
 	query := `
-		INSERT INTO dojo_registration_payments (id, dojo_id, event_id, file_path, status)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (dojo_id, event_id) DO UPDATE SET file_path = $4, uploaded_at = NOW(), status = $5
-		RETURNING id, dojo_id, event_id, file_path, uploaded_at, status
+		INSERT INTO dojo_registration_payments (
+			id,
+			dojo_id,
+			event_id,
+			file_path,
+			status,
+			payment_provider,
+			xendit_invoice_id,
+			xendit_external_id,
+			xendit_invoice_url,
+			xendit_status,
+			xendit_expiry_date,
+			xendit_paid_at,
+			xendit_raw_payload,
+			updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NOW())
+		ON CONFLICT (dojo_id, event_id) DO UPDATE SET
+			file_path = EXCLUDED.file_path,
+			uploaded_at = NOW(),
+			updated_at = NOW(),
+			status = EXCLUDED.status,
+			payment_provider = EXCLUDED.payment_provider,
+			xendit_invoice_id = NULL,
+			xendit_external_id = NULL,
+			xendit_invoice_url = NULL,
+			xendit_status = NULL,
+			xendit_expiry_date = NULL,
+			xendit_paid_at = NULL,
+			xendit_raw_payload = NULL
+		RETURNING
+			id,
+			dojo_id,
+			event_id,
+			file_path,
+			uploaded_at,
+			updated_at,
+			status,
+			payment_provider,
+			COALESCE(xendit_invoice_id, ''),
+			COALESCE(xendit_external_id, ''),
+			COALESCE(xendit_invoice_url, ''),
+			COALESCE(xendit_status, ''),
+			xendit_expiry_date,
+			xendit_paid_at
 	`
 
-	var payment models.DojoRegistrationPayment
-	err := p.db.QueryRow(queryCtx, query,
-		id, input.DojoID, input.EventID, input.FilePath, models.DocumentStatusPending,
-	).Scan(
-		&payment.ID, &payment.DojoID, &payment.EventID, &payment.FilePath, &payment.UploadedAt, &payment.Status,
-	)
+	payment, err := scanRegistrationPayment(p.db.QueryRow(queryCtx, query,
+		id, input.DojoID, input.EventID, input.FilePath, models.DocumentStatusPending, models.PaymentProviderManual,
+	))
 
 	if err != nil {
 		return nil, fmt.Errorf("insert registration payment: %w", err)
 	}
 
-	return &payment, nil
+	return payment, nil
+}
+
+// CreateOrUpdateXenditRegistrationPayment upserts dojo registration payment from Xendit invoice creation flow.
+func (p *ParticipantDB) CreateOrUpdateXenditRegistrationPayment(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+	invoiceID, externalID, invoiceURL, xenditStatus string,
+	expiryDate *time.Time,
+) (*models.DojoRegistrationPayment, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	id := uuid.New()
+	query := `
+		INSERT INTO dojo_registration_payments (
+			id,
+			dojo_id,
+			event_id,
+			file_path,
+			uploaded_at,
+			updated_at,
+			status,
+			payment_provider,
+			xendit_invoice_id,
+			xendit_external_id,
+			xendit_invoice_url,
+			xendit_status,
+			xendit_expiry_date,
+			xendit_paid_at,
+			xendit_raw_payload
+		)
+		VALUES ($1, $2, $3, NULL, NOW(), NOW(), $4, $5, $6, $7, $8, $9, $10, NULL, NULL)
+		ON CONFLICT (dojo_id, event_id) DO UPDATE SET
+			file_path = NULL,
+			uploaded_at = NOW(),
+			updated_at = NOW(),
+			status = EXCLUDED.status,
+			payment_provider = EXCLUDED.payment_provider,
+			xendit_invoice_id = EXCLUDED.xendit_invoice_id,
+			xendit_external_id = EXCLUDED.xendit_external_id,
+			xendit_invoice_url = EXCLUDED.xendit_invoice_url,
+			xendit_status = EXCLUDED.xendit_status,
+			xendit_expiry_date = EXCLUDED.xendit_expiry_date,
+			xendit_paid_at = NULL,
+			xendit_raw_payload = NULL
+		RETURNING
+			id,
+			dojo_id,
+			event_id,
+			file_path,
+			uploaded_at,
+			updated_at,
+			status,
+			payment_provider,
+			COALESCE(xendit_invoice_id, ''),
+			COALESCE(xendit_external_id, ''),
+			COALESCE(xendit_invoice_url, ''),
+			COALESCE(xendit_status, ''),
+			xendit_expiry_date,
+			xendit_paid_at
+	`
+
+	payment, err := scanRegistrationPayment(p.db.QueryRow(
+		queryCtx,
+		query,
+		id,
+		dojoID,
+		eventID,
+		models.DocumentStatusPending,
+		models.PaymentProviderXendit,
+		strings.TrimSpace(invoiceID),
+		strings.TrimSpace(externalID),
+		strings.TrimSpace(invoiceURL),
+		strings.TrimSpace(xenditStatus),
+		expiryDate,
+	))
+	if err != nil {
+		return nil, fmt.Errorf("upsert xendit registration payment: %w", err)
+	}
+
+	return payment, nil
+}
+
+// UpdateRegistrationPaymentByXenditInvoiceID updates payment row using Xendit webhook payload.
+func (p *ParticipantDB) UpdateRegistrationPaymentByXenditInvoiceID(
+	ctx context.Context,
+	webhook models.XenditInvoiceWebhookPayload,
+	internalStatus string,
+) (*models.DojoRegistrationPayment, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	rawPayloadJSON, err := json.Marshal(webhook.RawPayload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal webhook payload: %w", err)
+	}
+
+	query := `
+		UPDATE dojo_registration_payments
+		SET
+			xendit_status = $2,
+			xendit_invoice_url = CASE WHEN $3 = '' THEN xendit_invoice_url ELSE $3 END,
+			xendit_paid_at = $4,
+			xendit_expiry_date = $5,
+			xendit_raw_payload = $6::jsonb,
+			status = $7,
+			payment_provider = $8,
+			updated_at = NOW()
+		WHERE xendit_invoice_id = $1
+		RETURNING
+			id,
+			dojo_id,
+			event_id,
+			file_path,
+			uploaded_at,
+			updated_at,
+			status,
+			payment_provider,
+			COALESCE(xendit_invoice_id, ''),
+			COALESCE(xendit_external_id, ''),
+			COALESCE(xendit_invoice_url, ''),
+			COALESCE(xendit_status, ''),
+			xendit_expiry_date,
+			xendit_paid_at
+	`
+
+	payment, err := scanRegistrationPayment(p.db.QueryRow(
+		queryCtx,
+		query,
+		strings.TrimSpace(webhook.ID),
+		strings.TrimSpace(webhook.Status),
+		strings.TrimSpace(webhook.InvoiceURL),
+		webhook.PaidAt,
+		webhook.ExpiryDate,
+		string(rawPayloadJSON),
+		internalStatus,
+		models.PaymentProviderXendit,
+	))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("update registration payment by xendit invoice id: %w", err)
+	}
+
+	return payment, nil
 }
 
 // GetRecommendationLetter returns recommendation letter for a dojo and event
@@ -341,15 +562,26 @@ func (p *ParticipantDB) GetRegistrationPayment(
 	defer cancel()
 
 	query := `
-		SELECT id, dojo_id, event_id, file_path, uploaded_at, status
+		SELECT
+			id,
+			dojo_id,
+			event_id,
+			file_path,
+			uploaded_at,
+			updated_at,
+			status,
+			payment_provider,
+			COALESCE(xendit_invoice_id, ''),
+			COALESCE(xendit_external_id, ''),
+			COALESCE(xendit_invoice_url, ''),
+			COALESCE(xendit_status, ''),
+			xendit_expiry_date,
+			xendit_paid_at
 		FROM dojo_registration_payments
 		WHERE dojo_id = $1 AND event_id = $2
 	`
 
-	var payment models.DojoRegistrationPayment
-	err := p.db.QueryRow(queryCtx, query, dojoID, eventID).Scan(
-		&payment.ID, &payment.DojoID, &payment.EventID, &payment.FilePath, &payment.UploadedAt, &payment.Status,
-	)
+	payment, err := scanRegistrationPayment(p.db.QueryRow(queryCtx, query, dojoID, eventID))
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -358,7 +590,7 @@ func (p *ParticipantDB) GetRegistrationPayment(
 		return nil, fmt.Errorf("query registration payment: %w", err)
 	}
 
-	return &payment, nil
+	return payment, nil
 }
 
 // GetStatusSummary returns the status summary for participants in an event
@@ -709,15 +941,26 @@ func (p *ParticipantDB) UpdateRegistrationPaymentStatus(
 
 	query := `
 		UPDATE dojo_registration_payments
-		SET status = $3
+		SET status = $3, updated_at = NOW()
 		WHERE event_id = $1 AND dojo_id = $2
-		RETURNING id, dojo_id, event_id, file_path, uploaded_at, status
+		RETURNING
+			id,
+			dojo_id,
+			event_id,
+			file_path,
+			uploaded_at,
+			updated_at,
+			status,
+			payment_provider,
+			COALESCE(xendit_invoice_id, ''),
+			COALESCE(xendit_external_id, ''),
+			COALESCE(xendit_invoice_url, ''),
+			COALESCE(xendit_status, ''),
+			xendit_expiry_date,
+			xendit_paid_at
 	`
 
-	var payment models.DojoRegistrationPayment
-	err := p.db.QueryRow(queryCtx, query, eventID, dojoID, status).Scan(
-		&payment.ID, &payment.DojoID, &payment.EventID, &payment.FilePath, &payment.UploadedAt, &payment.Status,
-	)
+	payment, err := scanRegistrationPayment(p.db.QueryRow(queryCtx, query, eventID, dojoID, status))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -725,7 +968,7 @@ func (p *ParticipantDB) UpdateRegistrationPaymentStatus(
 		return nil, fmt.Errorf("update registration payment status: %w", err)
 	}
 
-	return &payment, nil
+	return payment, nil
 }
 
 // UpdateParticipantStatusByDojo updates one participant status within an event+dojo scope.

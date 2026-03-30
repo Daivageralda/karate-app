@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,6 +26,11 @@ type ParticipantHandler struct {
 
 type updateParticipantStatusRequest struct {
 	Status string `json:"status"`
+}
+
+type createRegistrationPaymentInvoiceRequest struct {
+	SuccessURL string `json:"success_url"`
+	FailureURL string `json:"failure_url"`
 }
 
 // NewParticipantHandler creates a new ParticipantHandler instance
@@ -398,6 +405,89 @@ func (h *ParticipantHandler) UploadRegistrationPayment(c *gin.Context) {
 	response.Success(c, http.StatusCreated, "registration payment uploaded", payment)
 }
 
+// CreateRegistrationPaymentInvoice handles POST /api/v1/events/:id/dojos/:dojoId/registration-payment/invoice
+// Creates a hosted Xendit invoice URL and stores it into dojo registration payment record.
+func (h *ParticipantHandler) CreateRegistrationPaymentInvoice(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	if !h.participantService.IsXenditEnabled() {
+		response.Error(c, http.StatusServiceUnavailable, "xendit integration is not configured")
+		return
+	}
+
+	var req createRegistrationPaymentInvoiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !strings.Contains(strings.ToLower(err.Error()), "eof") {
+		response.Error(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	payment, err := h.participantService.CreateRegistrationPaymentInvoice(c.Request.Context(), models.CreateRegistrationPaymentInvoiceInput{
+		EventID:      eventID,
+		DojoID:       dojoID,
+		SuccessURL:   strings.TrimSpace(req.SuccessURL),
+		FailureURL:   strings.TrimSpace(req.FailureURL),
+		InvoiceHours: 0,
+	})
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "registration payment invoice created", payment)
+}
+
+// HandleXenditInvoiceWebhook handles POST /api/v1/webhooks/xendit/invoice
+// Verifies callback token then updates dojo registration payment status by invoice ID.
+func (h *ParticipantHandler) HandleXenditInvoiceWebhook(c *gin.Context) {
+	callbackToken := c.GetHeader("x-callback-token")
+	if !h.participantService.ValidateXenditWebhookToken(callbackToken) {
+		response.Error(c, http.StatusUnauthorized, "invalid callback token")
+		return
+	}
+
+	var rawPayload map[string]any
+	if err := c.ShouldBindJSON(&rawPayload); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid webhook payload")
+		return
+	}
+
+	webhookPayload := models.XenditInvoiceWebhookPayload{
+		ID:         readStringValue(rawPayload["id"]),
+		ExternalID: readStringValue(rawPayload["external_id"]),
+		Status:     readStringValue(rawPayload["status"]),
+		InvoiceURL: readStringValue(rawPayload["invoice_url"]),
+		PaidAt:     parseOptionalRFC3339(readStringValue(rawPayload["paid_at"])),
+		ExpiryDate: parseOptionalRFC3339(readStringValue(rawPayload["expiry_date"])),
+		RawPayload: rawPayload,
+	}
+
+	payment, err := h.participantService.UpdateRegistrationPaymentFromXenditWebhook(c.Request.Context(), webhookPayload)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			response.Success(c, http.StatusOK, "webhook ignored, payment not found", gin.H{})
+			return
+		}
+
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, "xendit webhook processed", gin.H{
+		"payment_id": payment.ID,
+		"status":     payment.Status,
+	})
+}
+
 // GetRecommendationLetter handles GET /api/v1/events/:id/dojos/:dojoId/recommendation-letter
 // Returns persisted recommendation letter for a dojo and event.
 func (h *ParticipantHandler) GetRecommendationLetter(c *gin.Context) {
@@ -674,4 +764,33 @@ func validateDocumentMIME(file *multipart.FileHeader) error {
 	default:
 		return fmt.Errorf("file type not allowed: only PDF, JPEG, and PNG are accepted")
 	}
+}
+
+func readStringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	default:
+		if typed == nil {
+			return ""
+		}
+
+		return strings.TrimSpace(fmt.Sprintf("%v", typed))
+	}
+}
+
+func parseOptionalRFC3339(value string) *time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil
+	}
+
+	return &parsed
 }

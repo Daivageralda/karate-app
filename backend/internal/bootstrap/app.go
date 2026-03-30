@@ -82,7 +82,17 @@ func NewApp(cfg config.Config) (*App, error) {
 	dojoService := service.NewDojoService(dojoDB, cfg.UploadDir)
 	eventService := service.NewEventService(eventDB, cfg.UploadDir)
 	eventKelasTandingService := service.NewEventKelasTandingService(eventKelasTandingDB)
-	participantService := service.NewParticipantService(participantDB, eventDB, eventKelasTandingDB, cfg.UploadDir)
+	participantService := service.NewParticipantService(
+		participantDB,
+		eventDB,
+		dojoDB,
+		eventKelasTandingDB,
+		cfg.UploadDir,
+		cfg.XenditSecretKey,
+		cfg.XenditWebhookToken,
+		cfg.XenditBaseURL,
+		cfg.XenditInvoiceDurationHour,
+	)
 	kelasTandingService := service.NewKelasTandingService(kelasTandingDB)
 
 	// Initialize handler layer

@@ -29,22 +29,50 @@ const (
 type ParticipantService struct {
 	participantDB       *db.ParticipantDB
 	eventDB             *db.EventDB
+	dojoDB              *db.DojoDB
 	eventKelasTandingDB *db.EventKelasTandingDB
 	uploadDir           string
+	xenditClient        *XenditInvoiceClient
+	xenditWebhookToken  string
+	xenditEnabled       bool
+	xenditInvoiceHour   int
 }
 
 // NewParticipantService creates a new ParticipantService instance
-func NewParticipantService(participantDB *db.ParticipantDB, eventDB *db.EventDB, eventKelasTandingDB *db.EventKelasTandingDB, uploadDir string) *ParticipantService {
+func NewParticipantService(
+	participantDB *db.ParticipantDB,
+	eventDB *db.EventDB,
+	dojoDB *db.DojoDB,
+	eventKelasTandingDB *db.EventKelasTandingDB,
+	uploadDir string,
+	xenditSecretKey string,
+	xenditWebhookToken string,
+	xenditBaseURL string,
+	xenditInvoiceHour int,
+) *ParticipantService {
 	uploadDir = strings.TrimSpace(uploadDir)
 	if uploadDir == "" {
 		uploadDir = defaultParticipantUploadDir
 	}
 
+	if xenditInvoiceHour <= 0 {
+		xenditInvoiceHour = 24
+	}
+
+	xenditSecretKey = strings.TrimSpace(xenditSecretKey)
+	xenditWebhookToken = strings.TrimSpace(xenditWebhookToken)
+	xenditEnabled := xenditSecretKey != ""
+
 	return &ParticipantService{
 		participantDB:       participantDB,
 		eventDB:             eventDB,
+		dojoDB:              dojoDB,
 		eventKelasTandingDB: eventKelasTandingDB,
 		uploadDir:           uploadDir,
+		xenditClient:        NewXenditInvoiceClient(xenditSecretKey, xenditBaseURL),
+		xenditWebhookToken:  xenditWebhookToken,
+		xenditEnabled:       xenditEnabled,
+		xenditInvoiceHour:   xenditInvoiceHour,
 	}
 }
 
@@ -204,6 +232,205 @@ func (s *ParticipantService) CreateRegistrationPayment(
 	return payment, nil
 }
 
+// CreateRegistrationPaymentInvoice creates a hosted Xendit invoice for dojo registration payment.
+func (s *ParticipantService) CreateRegistrationPaymentInvoice(
+	ctx context.Context,
+	input models.CreateRegistrationPaymentInvoiceInput,
+) (*models.DojoRegistrationPayment, error) {
+	if input.EventID == uuid.Nil {
+		return nil, fmt.Errorf("event_id is required")
+	}
+
+	if input.DojoID == uuid.Nil {
+		return nil, fmt.Errorf("dojo_id is required")
+	}
+
+	if !s.xenditEnabled || s.xenditClient == nil {
+		return nil, fmt.Errorf("xendit is not configured")
+	}
+
+	summary, err := s.GetStatusSummary(ctx, input.EventID, input.DojoID)
+	if err != nil {
+		return nil, err
+	}
+
+	if summary.TotalNominal <= 0 {
+		return nil, fmt.Errorf("total nominal must be greater than zero before creating invoice")
+	}
+
+	event, err := s.eventDB.GetByID(ctx, input.EventID)
+	if err != nil {
+		return nil, fmt.Errorf("get event: %w", err)
+	}
+
+	dojo, err := s.dojoDB.GetByID(ctx, input.DojoID)
+	if err != nil {
+		return nil, fmt.Errorf("get dojo: %w", err)
+	}
+
+	invoiceResp, err := s.xenditClient.CreateInvoice(ctx, XenditCreateInvoiceInput{
+		ExternalID: s.buildRegistrationPaymentExternalID(input.EventID, input.DojoID),
+		Amount:     summary.TotalNominal,
+		PayerEmail: event.Organizer.Email,
+		Description: fmt.Sprintf(
+			"Pembayaran pendaftaran dojo %s untuk event %s",
+			dojo.Name,
+			event.Name,
+		),
+		InvoiceDurationHour: s.xenditInvoiceHour,
+		SuccessRedirectURL:  strings.TrimSpace(input.SuccessURL),
+		FailureRedirectURL:  strings.TrimSpace(input.FailureURL),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payment, err := s.participantDB.CreateOrUpdateXenditRegistrationPayment(
+		ctx,
+		input.EventID,
+		input.DojoID,
+		invoiceResp.ID,
+		invoiceResp.ExternalID,
+		invoiceResp.InvoiceURL,
+		invoiceResp.Status,
+		invoiceResp.ExpiryDate,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return payment, nil
+}
+
+// UpdateRegistrationPaymentFromXenditWebhook synchronizes payment status from Xendit callback.
+func (s *ParticipantService) UpdateRegistrationPaymentFromXenditWebhook(
+	ctx context.Context,
+	webhook models.XenditInvoiceWebhookPayload,
+) (*models.DojoRegistrationPayment, error) {
+	if strings.TrimSpace(webhook.ID) == "" {
+		return nil, fmt.Errorf("xendit invoice id is required")
+	}
+
+	if strings.TrimSpace(webhook.Status) == "" {
+		return nil, fmt.Errorf("xendit status is required")
+	}
+
+	internalStatus := mapXenditStatusToInternalStatus(webhook.Status)
+	payment, err := s.participantDB.UpdateRegistrationPaymentByXenditInvoiceID(ctx, webhook, internalStatus)
+	if err != nil {
+		return nil, err
+	}
+
+	if payment == nil {
+		return nil, fmt.Errorf("registration payment not found")
+	}
+
+	return payment, nil
+}
+
+// ValidateXenditWebhookToken verifies callback token header against configured value.
+func (s *ParticipantService) ValidateXenditWebhookToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" || strings.TrimSpace(s.xenditWebhookToken) == "" {
+		return false
+	}
+
+	return token == strings.TrimSpace(s.xenditWebhookToken)
+}
+
+func (s *ParticipantService) IsXenditEnabled() bool {
+	return s.xenditEnabled && s.xenditClient != nil
+}
+
+func (s *ParticipantService) buildRegistrationPaymentExternalID(eventID, dojoID uuid.UUID) string {
+	return fmt.Sprintf("dojo-reg-%s-%s-%d", eventID.String(), dojoID.String(), time.Now().Unix())
+}
+
+func mapXenditStatusToInternalStatus(status string) string {
+	normalizedStatus := strings.ToUpper(strings.TrimSpace(status))
+	switch normalizedStatus {
+	case models.XenditInvoiceStatusPaid, models.XenditInvoiceStatusSettled:
+		return models.DocumentStatusApproved
+	default:
+		return models.DocumentStatusPending
+	}
+}
+
+func deriveRegistrationPaymentDisplayStatus(payment *models.DojoRegistrationPayment) string {
+	if payment == nil {
+		return models.DocumentStatusNotUploaded
+	}
+
+	if strings.EqualFold(payment.Status, models.DocumentStatusApproved) {
+		return models.DocumentStatusApproved
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(payment.XenditStatus)) {
+	case models.XenditInvoiceStatusPaid, models.XenditInvoiceStatusSettled:
+		return models.DocumentStatusApproved
+	case models.XenditInvoiceStatusExpired:
+		return "expired"
+	case models.XenditInvoiceStatusFailed:
+		return "failed"
+	case models.XenditInvoiceStatusPending:
+		return models.DocumentStatusPending
+	}
+
+	if strings.TrimSpace(payment.XenditInvoiceID) != "" || strings.TrimSpace(payment.FilePath) != "" {
+		return models.DocumentStatusPending
+	}
+
+	return models.DocumentStatusNotUploaded
+}
+
+func (s *ParticipantService) syncRegistrationPaymentWithXendit(
+	ctx context.Context,
+	payment *models.DojoRegistrationPayment,
+) (*models.DojoRegistrationPayment, error) {
+	if payment == nil {
+		return nil, nil
+	}
+
+	if !strings.EqualFold(payment.PaymentProvider, models.PaymentProviderXendit) {
+		return payment, nil
+	}
+
+	if !s.IsXenditEnabled() || strings.TrimSpace(payment.XenditInvoiceID) == "" {
+		return payment, nil
+	}
+
+	invoice, err := s.xenditClient.GetInvoice(ctx, payment.XenditInvoiceID)
+	if err != nil {
+		return payment, nil
+	}
+
+	webhookPayload := models.XenditInvoiceWebhookPayload{
+		ID:         invoice.ID,
+		ExternalID: invoice.ExternalID,
+		Status:     invoice.Status,
+		InvoiceURL: invoice.InvoiceURL,
+		PaidAt:     invoice.PaidAt,
+		ExpiryDate: invoice.ExpiryDate,
+		RawPayload: map[string]any{
+			"id":          invoice.ID,
+			"external_id": invoice.ExternalID,
+			"status":      invoice.Status,
+			"invoice_url": invoice.InvoiceURL,
+		},
+	}
+
+	updatedPayment, updateErr := s.participantDB.UpdateRegistrationPaymentByXenditInvoiceID(
+		ctx,
+		webhookPayload,
+		mapXenditStatusToInternalStatus(invoice.Status),
+	)
+	if updateErr != nil || updatedPayment == nil {
+		return payment, nil
+	}
+
+	return updatedPayment, nil
+}
+
 // GetRecommendationLetter returns recommendation letter for a dojo and event.
 func (s *ParticipantService) GetRecommendationLetter(
 	ctx context.Context,
@@ -243,6 +470,11 @@ func (s *ParticipantService) GetRegistrationPayment(
 		return nil, err
 	}
 
+	payment, err = s.syncRegistrationPaymentWithXendit(ctx, payment)
+	if err != nil {
+		return nil, err
+	}
+
 	return payment, nil
 }
 
@@ -263,6 +495,18 @@ func (s *ParticipantService) GetStatusSummary(
 	if err != nil {
 		return nil, err
 	}
+
+	payment, err := s.participantDB.GetRegistrationPayment(ctx, dojoID, eventID)
+	if err != nil {
+		return nil, err
+	}
+
+	payment, err = s.syncRegistrationPaymentWithXendit(ctx, payment)
+	if err != nil {
+		return nil, err
+	}
+
+	summary.RegistrationPaymentStatus = deriveRegistrationPaymentDisplayStatus(payment)
 
 	return summary, nil
 }

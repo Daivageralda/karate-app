@@ -47,12 +47,20 @@ type DojoRecommendationLetter struct {
 
 // DojoRegistrationPayment represents a payment proof uploaded by a dojo for an event.
 type DojoRegistrationPayment struct {
-	ID         uuid.UUID `json:"uuid"`
-	DojoID     uuid.UUID `json:"dojo_id"`
-	EventID    uuid.UUID `json:"event_id"`
-	FilePath   string    `json:"file_path"`
-	UploadedAt time.Time `json:"uploaded_at"`
-	Status     string    `json:"status"`
+	ID               uuid.UUID  `json:"uuid"`
+	DojoID           uuid.UUID  `json:"dojo_id"`
+	EventID          uuid.UUID  `json:"event_id"`
+	FilePath         string     `json:"file_path"`
+	UploadedAt       time.Time  `json:"uploaded_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	Status           string     `json:"status"`
+	PaymentProvider  string     `json:"payment_provider"`
+	XenditInvoiceID  string     `json:"xendit_invoice_id,omitempty"`
+	XenditExternalID string     `json:"xendit_external_id,omitempty"`
+	XenditInvoiceURL string     `json:"xendit_invoice_url,omitempty"`
+	XenditStatus     string     `json:"xendit_status,omitempty"`
+	XenditExpiryDate *time.Time `json:"xendit_expiry_date,omitempty"`
+	XenditPaidAt     *time.Time `json:"xendit_paid_at,omitempty"`
 }
 
 // ParticipantStatus constants
@@ -72,6 +80,19 @@ const (
 	DocumentStatusPending     = "pending"
 	DocumentStatusApproved    = "approved"
 	DocumentStatusNotUploaded = "not_uploaded"
+)
+
+const (
+	PaymentProviderManual = "manual"
+	PaymentProviderXendit = "xendit"
+)
+
+const (
+	XenditInvoiceStatusPending = "PENDING"
+	XenditInvoiceStatusPaid    = "PAID"
+	XenditInvoiceStatusSettled = "SETTLED"
+	XenditInvoiceStatusExpired = "EXPIRED"
+	XenditInvoiceStatusFailed  = "FAILED"
 )
 
 // DeleteDojoRegistrationResult contains summary of deleted dojo registration data.
@@ -140,6 +161,29 @@ type UploadRegistrationPaymentInput struct {
 	DojoID   uuid.UUID
 	EventID  uuid.UUID
 	FilePath string
+}
+
+type CreateRegistrationPaymentInvoiceInput struct {
+	EventID      uuid.UUID
+	DojoID       uuid.UUID
+	Amount       int64
+	Description  string
+	PayerEmail   string
+	PayerName    string
+	SuccessURL   string
+	FailureURL   string
+	InvoiceHours int
+}
+
+type XenditInvoiceWebhookPayload struct {
+	ID          string
+	ExternalID  string
+	Status      string
+	InvoiceURL  string
+	PaidAt      *time.Time
+	ExpiryDate  *time.Time
+	RawPayload  map[string]any
+	PaymentType string
 }
 
 // ParticipantStatusSummary represents the status summary for participants in an event

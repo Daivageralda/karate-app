@@ -166,3 +166,36 @@ Semua response API menggunakan format resource seragam:
 
 - Module saat ini diinisialisasi sebagai `eo-karate`.
 - Jika nanti repo ini akan dipublish, ubah module path dengan `go mod edit -module your/module/path`.
+
+## Integrasi Xendit (Hosted Payment Page)
+
+Flow pembayaran dojo sekarang mendukung invoice hosted dari Xendit (sandbox/production sesuai key yang dipakai).
+
+### Environment Variables
+
+Tambahkan ke `.env`:
+
+```bash
+XENDIT_SECRET_KEY=xnd_development_xxx
+XENDIT_WEBHOOK_TOKEN=your_callback_token
+XENDIT_BASE_URL=https://api.xendit.co
+XENDIT_INVOICE_DURATION_HOUR=24
+```
+
+### Endpoint API
+
+- Buat/refresh invoice pembayaran dojo:
+  - `POST /api/v1/events/:id/dojos/:dojoId/registration-payment/invoice`
+- Callback webhook invoice Xendit:
+  - `POST /api/v1/webhooks/xendit/invoice`
+  - Wajib header: `x-callback-token: <XENDIT_WEBHOOK_TOKEN>`
+
+### Setup Webhook di Xendit
+
+Set callback URL invoice ke endpoint backend kamu, contoh:
+
+```text
+https://your-domain.com/api/v1/webhooks/xendit/invoice
+```
+
+Set callback verification token sama dengan `XENDIT_WEBHOOK_TOKEN`.
