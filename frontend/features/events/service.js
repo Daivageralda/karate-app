@@ -212,6 +212,13 @@ const normalizeRegistrationPayment = (rawValue) => {
     fileUrl: resolveAssetUrl(rawValue.file_path),
     uploadedAt: normalizeText(rawValue.uploaded_at),
     status: normalizeText(rawValue.status),
+    paymentProvider: normalizeText(rawValue.payment_provider),
+    xenditInvoiceId: normalizeText(rawValue.xendit_invoice_id),
+    xenditExternalId: normalizeText(rawValue.xendit_external_id),
+    xenditInvoiceUrl: normalizeText(rawValue.xendit_invoice_url),
+    xenditStatus: normalizeText(rawValue.xendit_status),
+    xenditExpiryDate: normalizeText(rawValue.xendit_expiry_date),
+    xenditPaidAt: normalizeText(rawValue.xendit_paid_at),
   };
 };
 

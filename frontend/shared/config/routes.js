@@ -16,6 +16,7 @@ export const ROUTES = Object.freeze({
   eventsCreate: "/events/create",
   eventsDetail: (id) => `/events/${id}`,
   eventsRegistrationDojoDetail: (eventId, dojoId) => `/events/${eventId}/registrations/${dojoId}`,
+  eventsRegistrationDojoPaymentProof: (eventId, dojoId) => `/events/${eventId}/registrations/${dojoId}/payment-proof`,
   eventsEdit: (id) => `/events/${id}/edit`,
   kelasTanding: "/kelas-tanding",
   kelasTandingCreate: "/kelas-tanding/create",
