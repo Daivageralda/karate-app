@@ -293,6 +293,7 @@ export function DojoEventDetailPage({ navigation, event }) {
   const participantDocumentInputRefs = useRef({});
   const recommendationLetterInputRef = useRef(null);
   const registrationPaymentInputRef = useRef(null);
+  const handledPaymentResultRef = useRef("");
 
   const eventId = event?.id;
   const dojoId = currentUser?.dojoId;
@@ -307,6 +308,45 @@ export function DojoEventDetailPage({ navigation, event }) {
     redirectUrl.searchParams.set("active_tab", "status");
     return redirectUrl.toString();
   }, [eventId]);
+
+  const handleCopyPaymentText = useCallback(async (label, value) => {
+    const normalizedValue = typeof value === "string"
+      ? value.trim()
+      : String(value || "").trim();
+
+    if (!normalizedValue) {
+      showToast({
+        tone: "error",
+        title: "Copy Gagal",
+        message: `${label} belum tersedia.`,
+      });
+      return;
+    }
+
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      showToast({
+        tone: "error",
+        title: "Copy Gagal",
+        message: "Clipboard tidak tersedia di browser ini.",
+      });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(normalizedValue);
+      showToast({
+        tone: "success",
+        title: "Berhasil Disalin",
+        message: `${label} berhasil disalin.`,
+      });
+    } catch {
+      showToast({
+        tone: "error",
+        title: "Copy Gagal",
+        message: `Tidak bisa menyalin ${label.toLowerCase()}.`,
+      });
+    }
+  }, [showToast]);
 
   const loadEventRegistrationData = useCallback(async () => {
     if (!eventId || !dojoId) {
@@ -380,18 +420,22 @@ export function DojoEventDetailPage({ navigation, event }) {
       setActiveTab(activeTabParam);
     }
 
-    if (paymentResult === "success") {
-      showToast({
-        tone: "success",
-        title: "Pembayaran Selesai",
-        message: "Kamu sudah kembali dari Xendit. Status pembayaran sedang diperbarui.",
-      });
-    } else if (paymentResult === "failure") {
-      showToast({
-        tone: "error",
-        title: "Pembayaran Belum Selesai",
-        message: "Pembayaran dibatalkan atau gagal. Kamu bisa coba lagi dari tab pembayaran.",
-      });
+    if (paymentResult && handledPaymentResultRef.current !== paymentResult) {
+      handledPaymentResultRef.current = paymentResult;
+
+      if (paymentResult === "success") {
+        showToast({
+          tone: "success",
+          title: "Pembayaran Selesai",
+          message: "Kamu sudah kembali dari Xendit. Status pembayaran sedang diperbarui.",
+        });
+      } else if (paymentResult === "failure") {
+        showToast({
+          tone: "error",
+          title: "Pembayaran Belum Selesai",
+          message: "Pembayaran dibatalkan atau gagal. Kamu bisa coba lagi dari tab pembayaran.",
+        });
+      }
     }
 
     if (dojoId && eventId) {
@@ -1011,6 +1055,17 @@ export function DojoEventDetailPage({ navigation, event }) {
   const uploadedRecommendationIsPdf = isPdfDocumentPath(recommendationFilePath);
   const registrationPaymentFilePath = registrationPaymentData?.file_path || "";
   const registrationPaymentInvoiceURL = registrationPaymentData?.xendit_invoice_url || "";
+  const manualPaymentBankName = typeof event?.bankTransfer?.bankName === "string"
+    ? event.bankTransfer.bankName.trim()
+    : "";
+  const manualPaymentAccountName = typeof event?.bankTransfer?.accountName === "string"
+    ? event.bankTransfer.accountName.trim()
+    : "";
+  const manualPaymentAccountNumber = typeof event?.bankTransfer?.accountNumber === "string"
+    ? event.bankTransfer.accountNumber.trim()
+    : "";
+  const manualPaymentAmountText = formatCurrency(totalNominal);
+  const manualPaymentAmountValue = totalNominal > 0 ? String(Math.round(totalNominal)) : "";
   const paymentProviderFromData = typeof registrationPaymentData?.payment_provider === "string"
     ? registrationPaymentData.payment_provider.trim().toLowerCase()
     : "";
@@ -1049,6 +1104,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       shortLabel: "Pendaftaran",
       fullLabel: "Ringkasan Pendaftaran",
       disabled: false,
+      isDone: isRegistrationCompleted,
     },
     {
       key: "peserta",
@@ -1056,6 +1112,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       shortLabel: "Data Atlet",
       fullLabel: "Upload Data Atlet (Excel)",
       disabled: false,
+      isDone: hasParticipants,
     },
     {
       key: "dokumen",
@@ -1063,6 +1120,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       shortLabel: "Berkas Atlet",
       fullLabel: "Upload Berkas Tiap Atlet",
       disabled: !hasParticipants,
+      isDone: allDocumentsUploaded,
     },
     {
       key: "rekomendasi",
@@ -1070,6 +1128,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       shortLabel: "Rekomendasi",
       fullLabel: "Upload Surat Rekomendasi Dojo",
       disabled: !hasParticipants,
+      isDone: recommendationLetterApproved,
     },
     {
       key: "pembayaran",
@@ -1077,6 +1136,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       shortLabel: "Pembayaran",
       fullLabel: "Pembayaran via Xendit",
       disabled: !hasUploadedRecommendation,
+      isDone: registrationPaymentApproved,
     },
   ];
   const activeTabMeta = registrationTabs.find((tab) => tab.key === activeTab) || registrationTabs[0];
@@ -1158,11 +1218,22 @@ export function DojoEventDetailPage({ navigation, event }) {
                     }
                   }}
                   disabled={isDisabled}
-                  className={`min-w-48 rounded-2xl px-4 py-3 text-left transition ${isActive
+                  className={`relative min-w-48 rounded-2xl px-4 py-3 text-left transition ${isActive
                     ? "bg-app-accent text-app-accent-contrast"
                     : "border border-app-border bg-app-surface-muted text-app-text-primary hover:border-app-accent hover:text-app-accent"
                   } ${isDisabled ? "cursor-not-allowed opacity-50" : ""}`}
                 >
+                  {!tab.isDone ? (
+                    <span
+                      title="Tahap ini belum selesai"
+                      className={`absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${isActive
+                        ? "bg-app-accent-contrast text-app-accent"
+                        : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      !
+                    </span>
+                  ) : null}
                   <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${isActive ? "text-app-accent-contrast/85" : "text-app-text-secondary"}`}>
                     {tab.step}
                   </p>
@@ -1809,7 +1880,7 @@ export function DojoEventDetailPage({ navigation, event }) {
           <section>
             <ActionBlock
               title="Pembayaran Pendaftaran"
-              description={`Pilih satu metode pembayaran untuk dojo ini. Setelah dipakai, metode akan dikunci. Total nominal saat ini ${formatCurrency(totalNominal)}.`}
+              description={`Pilih satu metode pembayaran untuk dojo ini. Setelah dipakai, metode akan dikunci. Hubungi admin apabila ingin mengganti metode pembayaran.`}
               isActive={registrationPaymentUploadAllowed}
               isCompleted={registrationPaymentApproved}
             >
@@ -1843,6 +1914,45 @@ export function DojoEventDetailPage({ navigation, event }) {
 
                 {isManualPaymentMethod ? (
                   <>
+                    {(manualPaymentBankName || manualPaymentAccountName || manualPaymentAccountNumber || totalNominal > 0) && (
+                      <div className="rounded-xl border border-app-border bg-app-surface-muted p-3 text-sm">
+                        <p className="mb-2 font-semibold text-app-text-primary">Tujuan Transfer</p>
+                        <div className="grid gap-2 text-app-text-secondary">
+                          {manualPaymentBankName && (
+                            <p><span className="font-medium text-app-text-primary">Bank:</span> {manualPaymentBankName}</p>
+                          )}
+                          {manualPaymentAccountName && (
+                            <p><span className="font-medium text-app-text-primary">Atas Nama:</span> {manualPaymentAccountName}</p>
+                          )}
+                          {manualPaymentAccountNumber && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p><span className="font-medium text-app-text-primary">No. Rekening:</span> {manualPaymentAccountNumber}</p>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPaymentText("Nomor rekening", manualPaymentAccountNumber)}
+                                className="inline-flex items-center gap-1 rounded-full border border-app-border bg-app-surface px-2 py-0.5 text-xs font-semibold text-app-text-primary transition hover:border-app-accent hover:text-app-accent"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                Salin
+                              </button>
+                            </div>
+                          )}
+                          {totalNominal > 0 && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p><span className="font-medium text-app-text-primary">Nominal Transfer:</span> {manualPaymentAmountText}</p>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPaymentText("Nominal pembayaran", manualPaymentAmountValue)}
+                                className="inline-flex items-center gap-1 rounded-full border border-app-border bg-app-surface px-2 py-0.5 text-xs font-semibold text-app-text-primary transition hover:border-app-accent hover:text-app-accent"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                Salin
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <input
                       ref={registrationPaymentInputRef}
                       type="file"
@@ -1930,6 +2040,7 @@ export function DojoEventDetailPage({ navigation, event }) {
                       <tr>
                         <th className="px-3 py-2 font-semibold">Bukti / Invoice</th>
                         <th className="px-3 py-2 font-semibold">Status</th>
+                        <th className="px-3 py-2 font-semibold">Metode Bayar</th>
                         <th className="px-3 py-2 font-semibold">Dibuat</th>
                       </tr>
                     </thead>
@@ -1941,6 +2052,11 @@ export function DojoEventDetailPage({ navigation, event }) {
                           </td>
                           <td className="px-3 py-2 text-app-text-secondary">{registrationPaymentLabel}</td>
                           <td className="px-3 py-2 text-app-text-secondary">
+                            {registrationPaymentData?.xendit_invoice_id || registrationPaymentData?.xendit_invoice_url
+                              ? registrationPaymentData?.xendit_payment_channel || "-"
+                              : "Manual Upload"}
+                          </td>
+                          <td className="px-3 py-2 text-app-text-secondary">
                             {registrationPaymentData?.uploaded_at
                               ? new Date(registrationPaymentData.uploaded_at).toLocaleString("id-ID")
                               : "-"}
@@ -1948,7 +2064,7 @@ export function DojoEventDetailPage({ navigation, event }) {
                         </tr>
                       ) : (
                         <tr className="border-t border-app-border">
-                          <td colSpan={3} className="px-3 py-3 text-app-text-secondary">
+                          <td colSpan={4} className="px-3 py-3 text-app-text-secondary">
                             Belum ada data pembayaran yang tersimpan.
                           </td>
                         </tr>
@@ -1956,12 +2072,6 @@ export function DojoEventDetailPage({ navigation, event }) {
                     </tbody>
                   </table>
                 </div>
-
-                {registrationPaymentData?.xendit_status && isXenditPaymentMethod ? (
-                  <p className="text-xs text-app-text-secondary">
-                    Status gateway: {registrationPaymentData.xendit_status}
-                  </p>
-                ) : null}
 
                 {!registrationPaymentUploadAllowed && (
                   <p className="text-xs text-app-text-secondary">
