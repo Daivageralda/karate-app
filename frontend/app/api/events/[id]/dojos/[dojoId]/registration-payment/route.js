@@ -40,3 +40,14 @@ export async function GET(_request, context) {
 
   return buildResponse(backendResponse);
 }
+
+export async function DELETE(_request, context) {
+  const { id, dojoId } = await context.params;
+
+  const backendResponse = await fetch(buildBackendRegistrationPaymentUrl(id, dojoId), {
+    method: "DELETE",
+    cache: "no-store",
+  });
+
+  return buildResponse(backendResponse);
+}

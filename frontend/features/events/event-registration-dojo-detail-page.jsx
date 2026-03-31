@@ -8,6 +8,7 @@ import { SiteShell } from "@/shared/components/site-shell";
 import { ROUTES } from "@/shared/config/routes";
 import {
   deleteEventDojoParticipant,
+  deleteEventDojoRegistrationPayment,
   getEventDojoRegistrationDetail,
   updateEventDojoParticipantStatus,
   updateEventDojoRegistrationPaymentStatus,
@@ -184,6 +185,7 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId, ini
   const [deleteLoadingMap, setDeleteLoadingMap] = useState({});
   const [letterApprovalLoading, setLetterApprovalLoading] = useState(false);
   const [paymentApprovalLoading, setPaymentApprovalLoading] = useState(false);
+  const [paymentCancelLoading, setPaymentCancelLoading] = useState(false);
   const [documentPreview, setDocumentPreview] = useState(null);
 
   const loadDetail = useCallback(async () => {
@@ -280,6 +282,26 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId, ini
       setActionError(updateError?.message || "Gagal memperbarui status bukti pendaftaran");
     } finally {
       setPaymentApprovalLoading(false);
+    }
+  };
+
+  const handleCancelRegistrationPayment = async () => {
+    const paymentType = isXenditPayment ? "Xendit" : "manual";
+    const isConfirmed = window.confirm(`Batalkan data pembayaran (${paymentType}) pendaftaran dojo ini? Data pembayaran akan dihapus dan dojo admin bisa memilih ulang metode pembayaran.`);
+    if (!isConfirmed) {
+      return;
+    }
+
+    setActionError("");
+    setPaymentCancelLoading(true);
+
+    try {
+      await deleteEventDojoRegistrationPayment(event.id, dojoId);
+      await loadDetail();
+    } catch (cancelError) {
+      setActionError(cancelError?.message || "Gagal membatalkan data pembayaran");
+    } finally {
+      setPaymentCancelLoading(false);
     }
   };
 
@@ -691,6 +713,20 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId, ini
                       </svg>
                     )}
                   </button>
+                  <button
+                    type="button"
+                    disabled={paymentCancelLoading || registrationPayment?.status === "approved"}
+                    onClick={handleCancelRegistrationPayment}
+                    title="Batalkan Data Pembayaran"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-full border border-orange-300 bg-orange-50 px-3 text-xs font-semibold text-orange-700 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {paymentCancelLoading ? (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-orange-600 border-t-transparent" />
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                    )}
+                    Batalkan Pembayaran
+                  </button>
                 </div>
                 <span className="text-xs text-app-text-secondary">
                   Dibuat: {formatDateTime(registrationPayment?.uploadedAt)}
@@ -709,6 +745,7 @@ export function EventRegistrationDojoDetailPage({ navigation, event, dojoId, ini
                     <p><span className="font-semibold">Gateway Status:</span> {registrationPayment?.xenditStatus || "-"}</p>
                     <p><span className="font-semibold">External ID:</span> {registrationPayment?.xenditExternalId || "-"}</p>
                     <p><span className="font-semibold">Expiry:</span> {registrationPayment?.xenditExpiryDate ? formatDateTime(registrationPayment.xenditExpiryDate) : "-"}</p>
+                    <p><span className="font-semibold">Metode Bayar:</span> {registrationPayment?.xenditPaymentChannel || "-"}</p>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {registrationPayment?.xenditInvoiceUrl && effectivePaymentStatus !== "approved" ? (
