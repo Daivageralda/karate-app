@@ -92,6 +92,14 @@ const normalizeConfig = (rawValue = {}) => {
   };
 };
 
+const normalizeBankTransfer = (rawValue = {}) => {
+  return {
+    bankName: normalizeText(rawValue.bank_name),
+    accountName: normalizeText(rawValue.account_name),
+    accountNumber: normalizeText(rawValue.account_number),
+  };
+};
+
 const normalizeBatasBerat = (rawValue) => {
   if (!rawValue || typeof rawValue !== "object") {
     return null;
@@ -219,6 +227,7 @@ const normalizeRegistrationPayment = (rawValue) => {
     xenditStatus: normalizeText(rawValue.xendit_status),
     xenditExpiryDate: normalizeText(rawValue.xendit_expiry_date),
     xenditPaidAt: normalizeText(rawValue.xendit_paid_at),
+    xenditPaymentChannel: normalizeText(rawValue.xendit_payment_channel),
   };
 };
 
@@ -237,6 +246,7 @@ const normalizeEvent = (rawValue = {}) => {
     bannerUrl: resolveAssetUrl(rawValue.banner_url),
     attachments: normalizeAttachments(rawValue.attachments),
     config: normalizeConfig(rawValue.config),
+    bankTransfer: normalizeBankTransfer(rawValue.bank_transfer),
     createdAt: normalizeText(rawValue.created_at),
     updatedAt: normalizeText(rawValue.updated_at),
   };
@@ -252,6 +262,14 @@ const buildEventFormData = (payload) => {
   formData.set("organizer", JSON.stringify(payload?.organizer || {}));
   formData.set("location", JSON.stringify(payload?.location || {}));
   formData.set("config", JSON.stringify(payload?.config || {}));
+
+  if (payload?.bankTransfer) {
+    formData.set("bank_transfer", JSON.stringify({
+      bank_name: payload.bankTransfer.bankName || "",
+      account_name: payload.bankTransfer.accountName || "",
+      account_number: payload.bankTransfer.accountNumber || "",
+    }));
+  }
 
   if (payload?.banner instanceof File) {
     formData.set("banner", payload.banner, payload.banner.name);
@@ -528,6 +546,19 @@ export const deleteEventDojoParticipant = async (eventId, dojoId, participantId)
   });
 
   await parseEnvelopeResponse(response, "Failed to delete participant");
+};
+
+export const deleteEventDojoRegistrationPayment = async (eventId, dojoId) => {
+  if (!eventId || !dojoId) {
+    throw new Error("Event ID dan Dojo ID wajib diisi");
+  }
+
+  const response = await fetch(`/api/events/${eventId}/dojos/${dojoId}/registration-payment`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
+
+  await parseEnvelopeResponse(response, "Gagal membatalkan data pembayaran pendaftaran");
 };
 
 export const getEventKelasTandingAssignments = async (eventId) => {

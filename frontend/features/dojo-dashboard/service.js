@@ -76,6 +76,14 @@ const normalizeConfig = (rawValue = {}) => {
   };
 };
 
+const normalizeBankTransfer = (rawValue = {}) => {
+  return {
+    bankName: normalizeText(rawValue.bank_name),
+    accountName: normalizeText(rawValue.account_name),
+    accountNumber: normalizeText(rawValue.account_number),
+  };
+};
+
 const parseEnvelopeResponse = async (response, fallbackErrorMessage) => {
   const responseText = await response.text();
   let envelope = null;
@@ -117,6 +125,7 @@ const normalizeEvent = (rawValue = {}) => {
     bannerUrl: resolveAssetUrl(rawValue.banner_url),
     attachments: normalizeAttachments(rawValue.attachments),
     config: normalizeConfig(rawValue.config),
+    bankTransfer: normalizeBankTransfer(rawValue.bank_transfer),
     createdAt: normalizeText(rawValue.created_at),
     updatedAt: normalizeText(rawValue.updated_at),
   };
