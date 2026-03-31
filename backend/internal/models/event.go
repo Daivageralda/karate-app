@@ -9,18 +9,19 @@ import (
 
 // Event represents an event in the system
 type Event struct {
-	ID          uuid.UUID         `json:"uuid"`
-	Name        string            `json:"name"`
-	Slug        string            `json:"slug"`
-	Description string            `json:"description"`
-	Time        EventTimeWindow   `json:"time"`
-	Organizer   EventOrganizer    `json:"organizer"`
-	Location    EventLocation     `json:"location"`
-	BannerURL   string            `json:"banner_url"`
-	Attachments []EventAttachment `json:"attachments"`
-	Config      EventConfig       `json:"config"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID           uuid.UUID         `json:"uuid"`
+	Name         string            `json:"name"`
+	Slug         string            `json:"slug"`
+	Description  string            `json:"description"`
+	Time         EventTimeWindow   `json:"time"`
+	Organizer    EventOrganizer    `json:"organizer"`
+	Location     EventLocation     `json:"location"`
+	BannerURL    string            `json:"banner_url"`
+	Attachments  []EventAttachment `json:"attachments"`
+	Config       EventConfig       `json:"config"`
+	BankTransfer EventBankTransfer `json:"bank_transfer"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
 }
 
 // EventTimeWindow stores start/end times and registration deadline
@@ -58,30 +59,39 @@ type EventConfig struct {
 	MaxParticipants    int    `json:"max_participants"`
 }
 
+// EventBankTransfer stores manual payment bank account details for an event
+type EventBankTransfer struct {
+	BankName      string `json:"bank_name"`
+	AccountName   string `json:"account_name"`
+	AccountNumber string `json:"account_number"`
+}
+
 // CreateEventInput is the input for creating an event
 type CreateEventInput struct {
-	Name        string                  `json:"name"`
-	Slug        string                  `json:"slug"`
-	Description string                  `json:"description"`
-	Time        EventTimeWindow         `json:"time"`
-	Organizer   EventOrganizer          `json:"organizer"`
-	Location    EventLocation           `json:"location"`
-	Config      EventConfig             `json:"config"`
-	BannerFile  *multipart.FileHeader   `json:"-"`
-	Attachments []*multipart.FileHeader `json:"-"`
+	Name         string                  `json:"name"`
+	Slug         string                  `json:"slug"`
+	Description  string                  `json:"description"`
+	Time         EventTimeWindow         `json:"time"`
+	Organizer    EventOrganizer          `json:"organizer"`
+	Location     EventLocation           `json:"location"`
+	Config       EventConfig             `json:"config"`
+	BankTransfer EventBankTransfer       `json:"bank_transfer"`
+	BannerFile   *multipart.FileHeader   `json:"-"`
+	Attachments  []*multipart.FileHeader `json:"-"`
 }
 
 // UpdateEventInput is the input for updating an event
 type UpdateEventInput struct {
-	Name        string                  `json:"name"`
-	Slug        string                  `json:"slug"`
-	Description string                  `json:"description"`
-	Time        EventTimeWindow         `json:"time"`
-	Organizer   EventOrganizer          `json:"organizer"`
-	Location    EventLocation           `json:"location"`
-	Config      EventConfig             `json:"config"`
-	BannerFile  *multipart.FileHeader   `json:"-"`
-	Attachments []*multipart.FileHeader `json:"-"`
+	Name         string                  `json:"name"`
+	Slug         string                  `json:"slug"`
+	Description  string                  `json:"description"`
+	Time         EventTimeWindow         `json:"time"`
+	Organizer    EventOrganizer          `json:"organizer"`
+	Location     EventLocation           `json:"location"`
+	Config       EventConfig             `json:"config"`
+	BankTransfer EventBankTransfer       `json:"bank_transfer"`
+	BannerFile   *multipart.FileHeader   `json:"-"`
+	Attachments  []*multipart.FileHeader `json:"-"`
 }
 
 // EventListResult is the result of listing events

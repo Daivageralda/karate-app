@@ -1,0 +1,2 @@
+ALTER TABLE events
+  ADD COLUMN IF NOT EXISTS bank_transfer JSONB NOT NULL DEFAULT '{}';

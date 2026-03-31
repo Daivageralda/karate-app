@@ -61,6 +61,11 @@ func (e *EventDB) Create(
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
+	bankTransferJSON, err := json.Marshal(input.BankTransfer)
+	if err != nil {
+		return nil, fmt.Errorf("marshal bank transfer: %w", err)
+	}
+
 	id := uuid.New()
 	query := `
 		INSERT INTO events (
@@ -74,10 +79,11 @@ func (e *EventDB) Create(
 			location,
 			banner_url,
 			attachments,
-			event_config
+			event_config,
+			bank_transfer
 		)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10::jsonb, $11::jsonb)
-		RETURNING id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, created_at, updated_at
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10::jsonb, $11::jsonb, $12::jsonb)
+		RETURNING id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, bank_transfer, created_at, updated_at
 	`
 
 	event, err := scanEvent(
@@ -95,6 +101,7 @@ func (e *EventDB) Create(
 			bannerURL,
 			string(attachmentsJSON),
 			string(configJSON),
+			string(bankTransferJSON),
 		),
 	)
 	if err != nil {
@@ -145,6 +152,11 @@ func (e *EventDB) Update(
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
 
+	bankTransferJSON, err := json.Marshal(input.BankTransfer)
+	if err != nil {
+		return nil, fmt.Errorf("marshal bank transfer: %w", err)
+	}
+
 	query := `
 		UPDATE events
 		SET
@@ -158,9 +170,10 @@ func (e *EventDB) Update(
 			banner_url = $9,
 			attachments = $10::jsonb,
 			event_config = $11::jsonb,
+			bank_transfer = $12::jsonb,
 			updated_at = NOW()
 		WHERE id = $1
-		RETURNING id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, created_at, updated_at
+		RETURNING id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, bank_transfer, created_at, updated_at
 	`
 
 	event, err := scanEvent(
@@ -178,6 +191,7 @@ func (e *EventDB) Update(
 			bannerURL,
 			string(attachmentsJSON),
 			string(configJSON),
+			string(bankTransferJSON),
 		),
 	)
 	if err != nil {
@@ -219,7 +233,7 @@ func (e *EventDB) GetByID(ctx context.Context, id uuid.UUID) (*models.Event, err
 	defer cancel()
 
 	query := `
-		SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, created_at, updated_at
+		SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, bank_transfer, created_at, updated_at
 		FROM events
 		WHERE id = $1
 	`
@@ -244,7 +258,7 @@ func (e *EventDB) List(ctx context.Context, query models.PaginationQuery) (*mode
 	queryLimit := query.Limit + 1
 
 	statement := `
-		SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, created_at, updated_at
+		SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, bank_transfer, created_at, updated_at
 		FROM events
 		ORDER BY start_at ASC, id ASC
 		LIMIT $1
@@ -260,7 +274,7 @@ func (e *EventDB) List(ctx context.Context, query models.PaginationQuery) (*mode
 		switch query.Direction {
 		case models.CursorDirectionNext:
 			statement = `
-				SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, created_at, updated_at
+				SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, bank_transfer, created_at, updated_at
 				FROM events
 				WHERE start_at > $1 OR (start_at = $1 AND id > $2)
 				ORDER BY start_at ASC, id ASC
@@ -269,7 +283,7 @@ func (e *EventDB) List(ctx context.Context, query models.PaginationQuery) (*mode
 			args = []any{cursorStartAt, cursorID, queryLimit}
 		case models.CursorDirectionPrev:
 			statement = `
-				SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, created_at, updated_at
+				SELECT id, name, slug, description, start_at, time_window, organizer, location, banner_url, attachments, event_config, bank_transfer, created_at, updated_at
 				FROM events
 				WHERE start_at < $1 OR (start_at = $1 AND id < $2)
 				ORDER BY start_at DESC, id DESC
@@ -327,6 +341,7 @@ func scanEvent(scanner rowScanner) (*models.Event, error) {
 	var locationJSON []byte
 	var attachmentsJSON []byte
 	var configJSON []byte
+	var bankTransferJSON []byte
 
 	err := scanner.Scan(
 		&event.ID,
@@ -340,6 +355,7 @@ func scanEvent(scanner rowScanner) (*models.Event, error) {
 		&event.BannerURL,
 		&attachmentsJSON,
 		&configJSON,
+		&bankTransferJSON,
 		&event.CreatedAt,
 		&event.UpdatedAt,
 	)
@@ -369,6 +385,12 @@ func scanEvent(scanner rowScanner) (*models.Event, error) {
 
 	if err := json.Unmarshal(configJSON, &event.Config); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	if len(bankTransferJSON) > 0 {
+		if err := json.Unmarshal(bankTransferJSON, &event.BankTransfer); err != nil {
+			return nil, fmt.Errorf("unmarshal bank transfer: %w", err)
+		}
 	}
 
 	return event, nil

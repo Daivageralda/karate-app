@@ -131,6 +131,12 @@ func parseEventInput(c *gin.Context, requireBanner bool) (models.UpdateEventInpu
 		return input, err
 	}
 
+	if bankTransferRaw := c.PostForm("bank_transfer"); bankTransferRaw != "" {
+		if err := parseJSONField(bankTransferRaw, &input.BankTransfer, "bank_transfer"); err != nil {
+			return input, err
+		}
+	}
+
 	bannerFile, err := c.FormFile("banner")
 	if err == nil {
 		input.BannerFile = bannerFile
