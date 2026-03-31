@@ -462,13 +462,14 @@ func (h *ParticipantHandler) HandleXenditInvoiceWebhook(c *gin.Context) {
 	}
 
 	webhookPayload := models.XenditInvoiceWebhookPayload{
-		ID:         readStringValue(rawPayload["id"]),
-		ExternalID: readStringValue(rawPayload["external_id"]),
-		Status:     readStringValue(rawPayload["status"]),
-		InvoiceURL: readStringValue(rawPayload["invoice_url"]),
-		PaidAt:     parseOptionalRFC3339(readStringValue(rawPayload["paid_at"])),
-		ExpiryDate: parseOptionalRFC3339(readStringValue(rawPayload["expiry_date"])),
-		RawPayload: rawPayload,
+		ID:             readStringValue(rawPayload["id"]),
+		ExternalID:     readStringValue(rawPayload["external_id"]),
+		Status:         readStringValue(rawPayload["status"]),
+		InvoiceURL:     readStringValue(rawPayload["invoice_url"]),
+		PaidAt:         parseOptionalRFC3339(readStringValue(rawPayload["paid_at"])),
+		ExpiryDate:     parseOptionalRFC3339(readStringValue(rawPayload["expiry_date"])),
+		PaymentChannel: deriveXenditPaymentChannel(rawPayload),
+		RawPayload:     rawPayload,
 	}
 
 	payment, err := h.participantService.UpdateRegistrationPaymentFromXenditWebhook(c.Request.Context(), webhookPayload)
@@ -742,6 +743,35 @@ func (h *ParticipantHandler) DeleteDojoRegistration(c *gin.Context) {
 	response.Success(c, http.StatusOK, "dojo registration deleted", result)
 }
 
+// DeleteRegistrationPayment handles DELETE /api/v1/events/:id/dojos/:dojoId/registration-payment
+// Deletes the registration payment record for a dojo in an event, allowing the dojo admin to re-select a payment method.
+// Blocked when payment status is approved.
+func (h *ParticipantHandler) DeleteRegistrationPayment(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	dojoID, err := uuid.Parse(c.Param("dojoId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid dojo id")
+		return
+	}
+
+	if err := h.participantService.DeleteRegistrationPayment(c.Request.Context(), eventID, dojoID); err != nil {
+		if strings.Contains(err.Error(), "already approved") {
+			response.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, "registration payment deleted", nil)
+}
+
 // validateDocumentMIME reads the first 512 bytes of an uploaded file and rejects
 // anything that is not a PDF or a supported image type (JPEG, PNG).
 func validateDocumentMIME(file *multipart.FileHeader) error {
@@ -793,4 +823,34 @@ func parseOptionalRFC3339(value string) *time.Time {
 	}
 
 	return &parsed
+}
+
+func deriveXenditPaymentChannel(rawPayload map[string]any) string {
+	if rawPayload == nil {
+		return ""
+	}
+
+	candidates := []string{
+		readStringValue(rawPayload["payment_channel"]),
+		readStringValue(rawPayload["payment_method"]),
+		readStringValue(rawPayload["payment_method_type"]),
+		readStringValue(rawPayload["channel_code"]),
+	}
+
+	if paymentMethodValue, ok := rawPayload["payment_method"].(map[string]any); ok {
+		candidates = append(candidates,
+			readStringValue(paymentMethodValue["payment_channel"]),
+			readStringValue(paymentMethodValue["channel_code"]),
+			readStringValue(paymentMethodValue["type"]),
+		)
+	}
+
+	for _, value := range candidates {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+
+	return ""
 }

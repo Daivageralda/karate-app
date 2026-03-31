@@ -404,18 +404,33 @@ func (s *ParticipantService) syncRegistrationPaymentWithXendit(
 		return payment, nil
 	}
 
+	invoicePaymentChannel := strings.TrimSpace(invoice.PaymentChannel)
+	if invoicePaymentChannel == "" {
+		invoicePaymentChannel = strings.TrimSpace(invoice.PaymentMethod)
+	}
+
+	// Skip sync if the Xendit status hasn't changed since the last sync.
+	// This prevents overwriting a superadmin's manual status change (e.g. rejecting
+	// an already-SETTLED invoice back to pending) on the very next loadDetail() call.
+	if strings.EqualFold(strings.TrimSpace(payment.XenditStatus), strings.TrimSpace(invoice.Status)) &&
+		strings.EqualFold(strings.TrimSpace(payment.XenditPaymentChannel), invoicePaymentChannel) {
+		return payment, nil
+	}
+
 	webhookPayload := models.XenditInvoiceWebhookPayload{
-		ID:         invoice.ID,
-		ExternalID: invoice.ExternalID,
-		Status:     invoice.Status,
-		InvoiceURL: invoice.InvoiceURL,
-		PaidAt:     invoice.PaidAt,
-		ExpiryDate: invoice.ExpiryDate,
+		ID:             invoice.ID,
+		ExternalID:     invoice.ExternalID,
+		Status:         invoice.Status,
+		InvoiceURL:     invoice.InvoiceURL,
+		PaidAt:         invoice.PaidAt,
+		ExpiryDate:     invoice.ExpiryDate,
+		PaymentChannel: invoicePaymentChannel,
 		RawPayload: map[string]any{
-			"id":          invoice.ID,
-			"external_id": invoice.ExternalID,
-			"status":      invoice.Status,
-			"invoice_url": invoice.InvoiceURL,
+			"id":              invoice.ID,
+			"external_id":     invoice.ExternalID,
+			"status":          invoice.Status,
+			"invoice_url":     invoice.InvoiceURL,
+			"payment_channel": invoicePaymentChannel,
 		},
 	}
 
@@ -951,6 +966,22 @@ func (s *ParticipantService) DeleteDojoRegistration(
 	}
 
 	return result, nil
+}
+
+// DeleteRegistrationPayment deletes the registration payment record for a dojo in an event.
+func (s *ParticipantService) DeleteRegistrationPayment(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+) error {
+	if eventID == uuid.Nil {
+		return fmt.Errorf("event_id is required")
+	}
+
+	if dojoID == uuid.Nil {
+		return fmt.Errorf("dojo_id is required")
+	}
+
+	return s.participantDB.DeleteRegistrationPayment(ctx, eventID, dojoID)
 }
 
 // DeleteParticipantFromDojoRegistration deletes one participant if dojo registration is not approved.

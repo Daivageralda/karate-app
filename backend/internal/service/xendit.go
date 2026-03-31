@@ -50,12 +50,14 @@ type xenditCreateInvoiceResponse struct {
 }
 
 type XenditInvoiceResponse struct {
-	ID         string
-	ExternalID string
-	Status     string
-	InvoiceURL string
-	ExpiryDate *time.Time
-	PaidAt     *time.Time
+	ID             string
+	ExternalID     string
+	Status         string
+	InvoiceURL     string
+	ExpiryDate     *time.Time
+	PaidAt         *time.Time
+	PaymentMethod  string
+	PaymentChannel string
 }
 
 func NewXenditInvoiceClient(secretKey, baseURL string) *XenditInvoiceClient {
@@ -193,12 +195,14 @@ func (c *XenditInvoiceClient) GetInvoice(ctx context.Context, invoiceID string) 
 	}
 
 	var rawResponse struct {
-		ID         string `json:"id"`
-		ExternalID string `json:"external_id"`
-		Status     string `json:"status"`
-		InvoiceURL string `json:"invoice_url"`
-		ExpiryDate string `json:"expiry_date"`
-		PaidAt     string `json:"paid_at"`
+		ID             string `json:"id"`
+		ExternalID     string `json:"external_id"`
+		Status         string `json:"status"`
+		InvoiceURL     string `json:"invoice_url"`
+		ExpiryDate     string `json:"expiry_date"`
+		PaidAt         string `json:"paid_at"`
+		PaymentMethod  string `json:"payment_method"`
+		PaymentChannel string `json:"payment_channel"`
 	}
 	if err := json.Unmarshal(body, &rawResponse); err != nil {
 		return nil, fmt.Errorf("decode xendit get invoice response: %w", err)
@@ -221,11 +225,13 @@ func (c *XenditInvoiceClient) GetInvoice(ctx context.Context, invoiceID string) 
 	}
 
 	return &XenditInvoiceResponse{
-		ID:         rawResponse.ID,
-		ExternalID: rawResponse.ExternalID,
-		Status:     rawResponse.Status,
-		InvoiceURL: rawResponse.InvoiceURL,
-		ExpiryDate: expiryDate,
-		PaidAt:     paidAt,
+		ID:             rawResponse.ID,
+		ExternalID:     rawResponse.ExternalID,
+		Status:         rawResponse.Status,
+		InvoiceURL:     rawResponse.InvoiceURL,
+		ExpiryDate:     expiryDate,
+		PaidAt:         paidAt,
+		PaymentMethod:  rawResponse.PaymentMethod,
+		PaymentChannel: rawResponse.PaymentChannel,
 	}, nil
 }

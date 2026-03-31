@@ -41,6 +41,7 @@ func New(healthHandler *HealthHandler, userHandler *UserHandler, dojoHandler *Do
 	api.POST("/events/:id/dojos/:dojoId/recommendation-letter", participantHandler.UploadRecommendationLetter)
 	api.GET("/events/:id/dojos/:dojoId/registration-payment", participantHandler.GetRegistrationPayment)
 	api.POST("/events/:id/dojos/:dojoId/registration-payment", participantHandler.UploadRegistrationPayment)
+	api.DELETE("/events/:id/dojos/:dojoId/registration-payment", participantHandler.DeleteRegistrationPayment)
 	api.POST("/events/:id/dojos/:dojoId/registration-payment/invoice", participantHandler.CreateRegistrationPaymentInvoice)
 	api.PUT("/events/:id/dojos/:dojoId/recommendation-letter/status", participantHandler.UpdateRecommendationLetterStatus)
 	api.PUT("/events/:id/dojos/:dojoId/registration-payment/status", participantHandler.UpdateRegistrationPaymentStatus)

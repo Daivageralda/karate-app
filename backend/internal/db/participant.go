@@ -42,6 +42,7 @@ func scanRegistrationPayment(row registrationPaymentScanner) (*models.DojoRegist
 		&payment.XenditStatus,
 		&payment.XenditExpiryDate,
 		&payment.XenditPaidAt,
+		&payment.XenditPaymentChannel,
 	)
 	if err != nil {
 		return nil, err
@@ -348,7 +349,8 @@ func (p *ParticipantDB) CreateRegistrationPayment(
 			xendit_status = NULL,
 			xendit_expiry_date = NULL,
 			xendit_paid_at = NULL,
-			xendit_raw_payload = NULL
+			xendit_raw_payload = NULL,
+			xendit_payment_channel = NULL
 		RETURNING
 			id,
 			dojo_id,
@@ -363,7 +365,8 @@ func (p *ParticipantDB) CreateRegistrationPayment(
 			COALESCE(xendit_invoice_url, ''),
 			COALESCE(xendit_status, ''),
 			xendit_expiry_date,
-			xendit_paid_at
+			xendit_paid_at,
+			COALESCE(xendit_payment_channel, '')
 	`
 
 	payment, err := scanRegistrationPayment(p.db.QueryRow(queryCtx, query,
@@ -419,7 +422,8 @@ func (p *ParticipantDB) CreateOrUpdateXenditRegistrationPayment(
 			xendit_status = EXCLUDED.xendit_status,
 			xendit_expiry_date = EXCLUDED.xendit_expiry_date,
 			xendit_paid_at = NULL,
-			xendit_raw_payload = NULL
+			xendit_raw_payload = NULL,
+			xendit_payment_channel = NULL
 		RETURNING
 			id,
 			dojo_id,
@@ -434,7 +438,8 @@ func (p *ParticipantDB) CreateOrUpdateXenditRegistrationPayment(
 			COALESCE(xendit_invoice_url, ''),
 			COALESCE(xendit_status, ''),
 			xendit_expiry_date,
-			xendit_paid_at
+			xendit_paid_at,
+			COALESCE(xendit_payment_channel, '')
 	`
 
 	payment, err := scanRegistrationPayment(p.db.QueryRow(
@@ -482,6 +487,7 @@ func (p *ParticipantDB) UpdateRegistrationPaymentByXenditInvoiceID(
 			xendit_raw_payload = $6::jsonb,
 			status = $7,
 			payment_provider = $8,
+			xendit_payment_channel = CASE WHEN $9 = '' THEN xendit_payment_channel ELSE $9 END,
 			updated_at = NOW()
 		WHERE xendit_invoice_id = $1
 		RETURNING
@@ -498,7 +504,8 @@ func (p *ParticipantDB) UpdateRegistrationPaymentByXenditInvoiceID(
 			COALESCE(xendit_invoice_url, ''),
 			COALESCE(xendit_status, ''),
 			xendit_expiry_date,
-			xendit_paid_at
+			xendit_paid_at,
+			COALESCE(xendit_payment_channel, '')
 	`
 
 	payment, err := scanRegistrationPayment(p.db.QueryRow(
@@ -512,6 +519,7 @@ func (p *ParticipantDB) UpdateRegistrationPaymentByXenditInvoiceID(
 		string(rawPayloadJSON),
 		internalStatus,
 		models.PaymentProviderXendit,
+		strings.TrimSpace(webhook.PaymentChannel),
 	))
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -576,7 +584,8 @@ func (p *ParticipantDB) GetRegistrationPayment(
 			COALESCE(xendit_invoice_url, ''),
 			COALESCE(xendit_status, ''),
 			xendit_expiry_date,
-			xendit_paid_at
+			xendit_paid_at,
+			COALESCE(xendit_payment_channel, '')
 		FROM dojo_registration_payments
 		WHERE dojo_id = $1 AND event_id = $2
 	`
@@ -957,7 +966,8 @@ func (p *ParticipantDB) UpdateRegistrationPaymentStatus(
 			COALESCE(xendit_invoice_url, ''),
 			COALESCE(xendit_status, ''),
 			xendit_expiry_date,
-			xendit_paid_at
+			xendit_paid_at,
+			COALESCE(xendit_payment_channel, '')
 	`
 
 	payment, err := scanRegistrationPayment(p.db.QueryRow(queryCtx, query, eventID, dojoID, status))
@@ -969,6 +979,38 @@ func (p *ParticipantDB) UpdateRegistrationPaymentStatus(
 	}
 
 	return payment, nil
+}
+
+// DeleteRegistrationPayment deletes the registration payment record for a dojo in an event.
+// Blocked when payment status is approved.
+func (p *ParticipantDB) DeleteRegistrationPayment(
+	ctx context.Context,
+	eventID, dojoID uuid.UUID,
+) error {
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var currentStatus string
+	statusQuery := `SELECT status FROM dojo_registration_payments WHERE event_id = $1 AND dojo_id = $2`
+	err := p.db.QueryRow(queryCtx, statusQuery, eventID, dojoID).Scan(&currentStatus)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("query registration payment status: %w", err)
+	}
+
+	if currentStatus == models.DocumentStatusApproved {
+		return fmt.Errorf("registration payment is already approved and cannot be deleted")
+	}
+
+	deleteQuery := `DELETE FROM dojo_registration_payments WHERE event_id = $1 AND dojo_id = $2`
+	_, err = p.db.Exec(queryCtx, deleteQuery, eventID, dojoID)
+	if err != nil {
+		return fmt.Errorf("delete registration payment: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateParticipantStatusByDojo updates one participant status within an event+dojo scope.
