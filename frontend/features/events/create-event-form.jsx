@@ -42,6 +42,9 @@ const initialFormValues = Object.freeze({
   status: "draft",
   isRegistrationOpen: false,
   maxParticipants: "0",
+  bankName: "",
+  bankAccountName: "",
+  bankAccountNumber: "",
 });
 
 const toLocalDateTimeValue = (isoValue) => {
@@ -79,6 +82,9 @@ const createInitialValuesFromEvent = (event) => {
     status: typeof event.config?.status === "string" ? event.config.status : "draft",
     isRegistrationOpen: Boolean(event.config?.isRegistrationOpen),
     maxParticipants: String(event.config?.maxParticipants ?? 0),
+    bankName: typeof event.bankTransfer?.bankName === "string" ? event.bankTransfer.bankName : "",
+    bankAccountName: typeof event.bankTransfer?.accountName === "string" ? event.bankTransfer.accountName : "",
+    bankAccountNumber: typeof event.bankTransfer?.accountNumber === "string" ? event.bankTransfer.accountNumber : "",
   };
 };
 
@@ -266,6 +272,11 @@ export function CreateEventForm({ mode = "create", eventId = "", initialEvent = 
         status: formValues.status,
         is_registration_open: formValues.isRegistrationOpen,
         max_participants: Number.parseInt(formValues.maxParticipants || "0", 10),
+      },
+      bankTransfer: {
+        bankName: formValues.bankName,
+        accountName: formValues.bankAccountName,
+        accountNumber: formValues.bankAccountNumber,
       },
       banner: bannerFile || undefined,
       attachments,
@@ -493,6 +504,45 @@ export function CreateEventForm({ mode = "create", eventId = "", initialEvent = 
           />
           Pendaftaran dibuka
         </label>
+
+        <div className="sm:col-span-2 grid gap-2">
+          <p className="text-sm font-medium text-app-text-secondary">Info Transfer Bank (untuk pembayaran manual)</p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="grid gap-2 text-sm text-app-text-secondary">
+              Nama Bank
+              <input
+                type="text"
+                name="bankName"
+                value={formValues.bankName}
+                onChange={handleFieldChange}
+                placeholder="Contoh: BCA"
+                className="rounded-xl border border-app-border bg-app-surface-muted px-3 py-2 text-sm text-app-text-primary outline-none transition focus:border-app-accent"
+              />
+            </label>
+            <label className="grid gap-2 text-sm text-app-text-secondary">
+              Nama Rekening
+              <input
+                type="text"
+                name="bankAccountName"
+                value={formValues.bankAccountName}
+                onChange={handleFieldChange}
+                placeholder="Nama pemilik rekening"
+                className="rounded-xl border border-app-border bg-app-surface-muted px-3 py-2 text-sm text-app-text-primary outline-none transition focus:border-app-accent"
+              />
+            </label>
+            <label className="grid gap-2 text-sm text-app-text-secondary">
+              Nomor Rekening
+              <input
+                type="text"
+                name="bankAccountNumber"
+                value={formValues.bankAccountNumber}
+                onChange={handleFieldChange}
+                placeholder="Nomor rekening tujuan"
+                className="rounded-xl border border-app-border bg-app-surface-muted px-3 py-2 text-sm text-app-text-primary outline-none transition focus:border-app-accent"
+              />
+            </label>
+          </div>
+        </div>
 
         <label className="grid gap-2 text-sm text-app-text-secondary sm:col-span-2">
           Banner atau Poster
