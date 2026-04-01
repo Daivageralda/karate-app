@@ -1135,7 +1135,7 @@ export function DojoEventDetailPage({ navigation, event }) {
       step: "Tahap 4",
       shortLabel: "Pembayaran",
       fullLabel: "Pembayaran via Xendit",
-      disabled: !hasUploadedRecommendation,
+      disabled: !hasParticipants || !hasUploadedRecommendation,
       isDone: registrationPaymentApproved,
     },
   ];
